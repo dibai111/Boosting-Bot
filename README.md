@@ -25,15 +25,6 @@ Botting 是原本 user software 的獨立副本，集中處理 Minecraft 帳號�
 - **桌面操作**：快捷鍵、浮動配對 overlay、主題切換和記錄匯出。
 - **啟動體驗**：保留品牌啟動 animation，完成載入後直接展開到主工作區。
 
-## 這個副本已移除的內容
-
-- 產品 license／activation 介面及相關遠端驗證流程。
-- anti-debug、device binding、release manifest 和 runtime lease protection。
-- suggestion／bug feedback 頁面、表單和提交 command。
-- admin app、control-plane service 及 release protection tooling。
-
-Minecraft 帳號登入仍然保留，因為 bot 連線到遊戲伺服器時仍然需要有效的遊戲帳號憑證；這不是產品啟用流程。帳號和設定會使用 Windows DPAPI 加密後保存到目前使用者的 Registry。
-
 ## 專案結構
 
 ```text
