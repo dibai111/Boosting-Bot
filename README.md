@@ -77,7 +77,3 @@ pnpm tauri:build
 5. 在 **Sessions** 查看即時狀態和匯出記錄。
 
 請只使用你有權使用的 Minecraft 帳號和伺服器，並遵守相關服務的規則。
-
-## 與原始專案的關係
-
-原始 repo 位於 `D:\Codex\Boosting Bot`。本資料夾是獨立副本，修改只會影響 `D:\Codex\Botting`，不會回寫原始 user software。
