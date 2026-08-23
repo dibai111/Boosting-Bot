@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Build output
+target/
+dist/
+.svelte-kit/
+.vite/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# IDE and operating system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

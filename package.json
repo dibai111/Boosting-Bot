@@ -1,0 +1,13 @@
+{
+  "name": "botting-standalone",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.9.0",
+  "scripts": {
+    "dev": "pnpm --dir apps/user-desktop dev",
+    "build": "pnpm --dir apps/user-desktop build",
+    "check": "pnpm --dir apps/user-desktop check",
+    "tauri:dev": "pnpm --dir apps/user-desktop tauri dev",
+    "tauri:build": "pnpm --dir apps/user-desktop tauri build"
+  }
+}

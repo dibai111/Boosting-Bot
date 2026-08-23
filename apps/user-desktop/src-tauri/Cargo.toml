@@ -1,0 +1,29 @@
+[package]
+name = "botting-user"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "botting_user_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.4", features = [] }
+
+[dependencies]
+anyhow.workspace = true
+azalea.workspace = true
+base64.workspace = true
+bevy_ecs.workspace = true
+chrono.workspace = true
+local-store = { path = "../../../crates/local-store" }
+reqwest = { workspace = true, features = ["stream"] }
+rand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tauri.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_System_Diagnostics_Debug", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Kernel", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_ProcessStatus", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }

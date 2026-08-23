@@ -1,0 +1,33 @@
+.ripple-button {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.ripple-button > :not(.ripple-wave) {
+  position: relative;
+  z-index: 1;
+}
+
+.ripple-wave {
+  position: absolute;
+  z-index: 0;
+  display: block;
+  border-radius: 50%;
+  background: var(--ripple-color, #ADD8E6);
+  opacity: .32;
+  pointer-events: none;
+  will-change: transform, opacity;
+  transform: scale(.9);
+  animation: ripple-wave-expand var(--motion-duration-press, 140ms)
+    var(--motion-ease-out, cubic-bezier(.23, 1, .32, 1)) forwards;
+}
+
+@keyframes ripple-wave-expand {
+  0% { opacity: .32; transform: scale(.9); }
+  100% { opacity: 0; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ripple-wave { display: none; }
+}
