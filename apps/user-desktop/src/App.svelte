@@ -26,15 +26,16 @@
   } from "./lib/log/session-log";
   import AccountCard from "./lib/components/account/AccountCard.svelte";
   import BotCard from "./lib/components/bot/BotCard.svelte";
+  import NickRollerPanel from "./lib/components/nick/NickRollerPanel.svelte";
   import MatchmakingOverlay from "./lib/components/matchmaking/MatchmakingOverlay.svelte";
   import MinecraftHead from "./lib/components/minecraft/MinecraftHead.svelte";
   import SelectMenu from "./lib/components/controls/SelectMenu.svelte";
-  import type { Account, AuthKind, BotEvent, BotMatchPhase, BotPhase, GameKind, GameMode, MatchmakingPhase, MatchmakingSnapshot, SessionLogEntry } from "./lib/models/types";
+  import type { Account, AuthKind, BotEvent, BotMatchPhase, BotPhase, GameKind, GameMode, MatchmakingPhase, MatchmakingSnapshot, RuntimeMode, SessionLogEntry } from "./lib/models/types";
   import { closeWindow, minimizeWindow, onFileDrop, setUserWindowMode, type FileDropEvent } from "./lib/adapters/window";
 
-  type Page = "overview" | "bots" | "matchmaking" | "accounts" | "sessions" | "settings";
+  type Page = "overview" | "bots" | "matchmaking" | "nick-roller" | "nick-roller-settings" | "accounts" | "sessions" | "settings";
   type Theme = "light" | "dark";
-  type SidebarMenu = "bots" | "sessions";
+  type SidebarMenu = "bots" | "sessions" | "nick-roller";
   type SessionLogFilter = "all" | "errors" | "matchmaking";
   type ShortcutAction = "stop" | "show_overlay";
 
@@ -113,6 +114,8 @@
   let verifyDuelPitch = settings["botting-verify-duel-pitch"] !== "false";
   let requiredMatches = 1;
   let matchmakingBusy = false;
+  let activeMode: RuntimeMode = "idle";
+  let nickEvents: BotEvent[] = [];
   let matchActive = false;
   let overlayVisible = false;
   let overlayAnimationKey = 0;
@@ -136,10 +139,10 @@
   // 直接讀取 phases，確保 Rust bot runtime 的狀態事件會觸發統計更新。
   $: onlineCount = accounts.filter((account) => phases[account.id] === "online").length;
   $: waitingCount = accounts.filter((account) => !phases[account.id] || phases[account.id] === "offline").length;
-  $: currentPageTitle = page === "overview" ? "overview" : page;
+  $: currentPageTitle = page === "overview" ? "overview" : page === "nick-roller" ? "nickRoller" : page === "nick-roller-settings" ? "settings" : page;
   $: currentPageSubtitle = ({
     overview: "overviewSub", bots: "botsSub", accounts: "accountsSub",
-    matchmaking: "matchmakingHelp", sessions: "sessionsSub", settings: "settingsSub",
+    matchmaking: "matchmakingHelp", "nick-roller": "nickRollerSub", "nick-roller-settings": "nickRollerRules", sessions: "sessionsSub", settings: "settingsSub",
   } as Record<Page, MessageKey>)[page];
   $: onlineAccounts = accounts.filter((account) => phases[account.id] === "online");
   $: sessionBotOptions = buildSessionBotOptions(accounts, sessionLogs, sessionBotLabels, t("bot"))
@@ -198,6 +201,7 @@
     stoppingBotIds = appState.stoppingBotIds;
     matchmaking = appState.matchmaking;
     matchmakingBusy = appState.matchmakingBusy;
+    activeMode = appState.activeMode;
     overlayVisible = appState.overlayVisible;
     deviceCode = appState.deviceCode;
     deviceLinkError = appState.deviceLinkError;
@@ -254,6 +258,7 @@
     void api.configureMatchmakingShortcuts(stopShortcut, showOverlayShortcut).catch((error) => {
       showToast(shortcutErrorLabel(error), "error");
     });
+    void api.activeMode().then((mode) => userApp.setActiveMode(mode)).catch(() => undefined);
     void refreshMemory();
     Promise.all([
       api.listAccounts(),
@@ -346,6 +351,9 @@
 
   function handleMatchmakingState(next: MatchmakingSnapshot) {
     userApp.handleMatchmakingState(next);
+    if ((next.phase === "idle" || next.phase === "failed") && activeMode === "matching") {
+      void api.activeMode().then((mode) => userApp.setActiveMode(mode)).catch(() => undefined);
+    }
   }
 
   function matchBotClass(phase: BotMatchPhase): string {
@@ -643,6 +651,13 @@
   }
 
   function handleBotEvent(event: BotEvent) {
+    if (event.type === "runtime_mode" && event.mode === "nick_roller") nickEvents = [];
+    if (event.type === "nick_roller_state"
+      || event.type === "nick_candidate"
+      || event.type === "nick_verification"
+      || event.type === "nick_attention") {
+      nickEvents = [...nickEvents.slice(-199), event];
+    }
     userApp.handleBotEvent(event);
   }
 
@@ -687,6 +702,16 @@
     followSessionTail = true;
     sessionUnreadCount = 0;
     void scrollSessionToLatest(true);
+  }
+
+  function openNickRoller(keepMenuOpen = false) {
+    page = "nick-roller";
+    openSidebarMenu = keepMenuOpen ? "nick-roller" : null;
+  }
+
+  function openNickRollerSettings() {
+    page = "nick-roller-settings";
+    openSidebarMenu = "nick-roller";
   }
 
   function sessionStatusClass(phase: BotPhase): string {
@@ -904,10 +929,10 @@
             <ChevronDown class="sidebar-nav-chevron" size={15} />
           </button>
           <div class="sidebar-nav-list" class:open={openSidebarMenu === "bots"} aria-hidden={openSidebarMenu !== "bots"}>
-            <div class="sidebar-nav-list-inner compact">
-              <button class="sidebar-nav-option" class:selected={page === "matchmaking"} tabindex={openSidebarMenu === "bots" ? 0 : -1} on:click={() => { page = "matchmaking"; openSidebarMenu = null; }}>
+            <div class="sidebar-nav-list-inner">
+              <button class="sidebar-nav-option" class:selected={page === "matchmaking"} disabled={activeMode === "nick_roller"} title={activeMode === "nick_roller" ? t("nickRollerLockMessage") : t("matchmaking")} tabindex={openSidebarMenu === "bots" ? 0 : -1} on:click={() => { if (activeMode !== "nick_roller") { page = "matchmaking"; openSidebarMenu = null; } }}>
                 <span class="sidebar-nav-status all"><Radio size={12} /></span>
-                <span><strong>{t("matchmaking")}</strong><small>{selectedBotIds.size} {t("bots").toLowerCase()}</small></span>
+                <span><strong>{t("matchmaking")}</strong><small>{activeMode === "nick_roller" ? "🔒" : `${selectedBotIds.size} ${t("bots").toLowerCase()}`}</small></span>
               </button>
             </div>
           </div>
@@ -939,6 +964,29 @@
                   <span><strong>{option.username}</strong><small>{phaseLabel(phaseLabels[option.id] ?? "offline")}</small></span>
                 </button>
               {/each}
+            </div>
+          </div>
+        </div>
+        <div
+          class="sidebar-nav-group"
+          class:expanded={openSidebarMenu === "nick-roller"}
+          role="group"
+          on:pointerenter={() => showSidebarMenuSoon("nick-roller")}
+          on:pointerleave={hideSidebarMenuSoon}
+          on:focusin={() => showSidebarMenu("nick-roller")}
+          on:focusout={handleSidebarNavFocusOut}
+        >
+          <button class="sidebar-nav-trigger" class:active={page === "nick-roller" || page === "nick-roller-settings"} aria-expanded={openSidebarMenu === "nick-roller"} on:click={() => openNickRoller(true)}>
+            <Box size={19} />
+            <span>{t("nickRoller")}</span>
+            <ChevronDown class="sidebar-nav-chevron" size={15} />
+          </button>
+          <div class="sidebar-nav-list" class:open={openSidebarMenu === "nick-roller"} aria-hidden={openSidebarMenu !== "nick-roller"}>
+            <div class="sidebar-nav-list-inner">
+              <button class="sidebar-nav-option" class:selected={page === "nick-roller-settings"} tabindex={openSidebarMenu === "nick-roller" ? 0 : -1} on:click={openNickRollerSettings}>
+                <span class="sidebar-nav-status all"><SlidersHorizontal size={12} /></span>
+                <span><strong>{t("settings")}</strong><small>{t("nickRollerRules")}</small></span>
+              </button>
             </div>
           </div>
         </div>
@@ -1035,8 +1083,26 @@
             {/each}
           </div>
 
+        {:else if page === "nick-roller" || page === "nick-roller-settings"}
+          <NickRollerPanel
+            {accounts}
+            phases={phaseLabels}
+            {selectedBotIds}
+            {activeMode}
+            events={nickEvents}
+            {settings}
+            {t}
+            settingsOnly={page === "nick-roller-settings"}
+            onToggleBot={(botId) => userApp.setSelectedBotIds(toggleSelection(selectedBotIds, botId))}
+            {savePreference}
+            {showToast}
+          />
+
         {:else if page === "matchmaking"}
           <section class="matchmaking-panel" aria-label={t("matchmaking")}>
+            {#if activeMode === "nick_roller"}
+              <div class="matchmaking-mode-notice"><Info size={15} /><span>{t("nickRollerRunningLock")}</span></div>
+            {/if}
             <header class="matchmaking-header">
               <div class="matchmaking-heading">
                 <span
@@ -1096,7 +1162,7 @@
             </div>
             <div class="matchmaking-actions">
               <div class="matchmaking-action-control">
-                <button class="matchmaking-command ripple-button" use:ripple={{ rippleColor: "#ADD8E6" }} class:active={matchActive} aria-pressed={matchActive} disabled={matchmakingBusy || (!matchActive && !selectedOnlineBotCount)} on:click={toggleMatchmaking}>
+                <button class="matchmaking-command ripple-button" use:ripple={{ rippleColor: "#ADD8E6" }} class:active={matchActive} aria-pressed={matchActive} disabled={matchmakingBusy || activeMode === "nick_roller" || (!matchActive && !selectedOnlineBotCount)} on:click={toggleMatchmaking}>
                   {#if matchActive}<Square size={16} />{t("stopMatching")}{:else}<Play size={16} />{t("startMatching")}{/if}
                 </button>
                 <button class="shortcut-key" class:recording={recordingShortcut === "stop"} title={t("shortcutHelp")} aria-label={`${matchActive ? t("stopMatching") : t("startMatching")}: ${t("shortcutHelp")}`} on:click={() => beginShortcutRecording("stop")}><kbd>{recordingShortcut === "stop" ? "…" : shortcutLabel(stopShortcut)}</kbd></button>

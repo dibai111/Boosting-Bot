@@ -18,6 +18,7 @@ Botting 將 Minecraft 帳號、bot 啟停、伺服器地址、配對流程和工
 - **帳號管理**：使用 Microsoft、Access Token 或 Cookie 新增 Minecraft 帳號。
 - **Bot 控制**：逐個或批量啟動、停止 bot，並為每個帳號保存獨立伺服器地址。
 - **配對工作階段**：支援 BedWars、Duels 和 SkyWars 的配對流程。
+- **Nick Roller**：獨立篩選和套用 Hypixel nick；運行期間會鎖定配對功能。
 - **即時記錄**：查看 bot 狀態、聊天記錄、配對進度和 session log。
 - **桌面操作**：快捷鍵、浮動配對 overlay、主題切換和記錄匯出。
 
@@ -84,6 +85,7 @@ pnpm tauri:build
 2. 開啟 **Accounts**，新增 Microsoft 帳號或匯入 token／cookie。
 3. 在 **Bots** 設定各帳號的伺服器地址，選擇要啟動的 bot。
 4. 在 **Matchmaking** 選擇遊戲模式和配對數量。
-5. 在 **Sessions** 查看即時狀態和匯出記錄。
+5. 或在 **Nick Roller** 選擇在線 bot、設定 nick 規則，再開始篩選；兩種工作模式不能同時運行。
+6. 在 **Sessions** 查看即時狀態和匯出記錄。
 
 請只使用你有權使用的 Minecraft 帳號和伺服器，並遵守相關服務的規則。

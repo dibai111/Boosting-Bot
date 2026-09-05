@@ -2,6 +2,7 @@ use super::{
     account::MinecraftAccessTokenAccount,
     afk::AdvancedAfk,
     detection::{self, PitchTracker},
+    nick_roller::{NickAction, NickBook, NickInput, NickRoller, NickRollerPhase},
     BotCommand, BotConfig, BotEvent, BotGamePhase, BotPhase, GameKind, MatchAttempt,
     SessionEmitter,
 };
@@ -15,7 +16,9 @@ use azalea::{
         query::{With, Without},
     },
     entity::{metadata::Player, LocalEntity, LookDirection},
+    inventory::{components::WrittenBookContent, ItemStack},
     pathfinder::PathfinderPlugin,
+    registry::builtin::ItemKind,
     Client, ClientBuilder, ClientInformation, DefaultPlugins, Event,
 };
 use std::{
@@ -91,8 +94,7 @@ pub(super) async fn run(
     );
     let mut actor_task = tokio::spawn(actor.run());
 
-    // Azalea 的 PhysicsPlugin 必須保留 movement；只移除不會使用的 pathfinder。
-    // 保留 Azalea 的物理插件以維持正常移動，只移除未使用的尋路功能。
+    // 保留物理插件維持正常移動，只移除不使用的尋路功能。
     let _exit = ClientBuilder::new_without_plugins()
         .add_plugins(DefaultPlugins)
         .add_plugins(DefaultBotPlugins.build().disable::<PathfinderPlugin>())
@@ -207,6 +209,8 @@ struct SessionActor {
     request_azalea_exit: bool,
     afk: AdvancedAfk,
     matchmaking: MatchController,
+    nick_roller: NickRoller,
+    last_nick_book: Option<ItemStack>,
     exit_reason: String,
 }
 
@@ -233,6 +237,8 @@ impl SessionActor {
             request_azalea_exit: true,
             afk: AdvancedAfk::new(now),
             matchmaking: MatchController::new(),
+            nick_roller: NickRoller::new(),
+            last_nick_book: None,
             exit_reason: "Bot session ended".to_owned(),
         }
     }
@@ -297,10 +303,51 @@ impl SessionActor {
     }
 
     fn dispatch(&mut self, command: BotCommand) {
-        let Some(client) = self.client.as_ref() else {
-            self.emit_not_ready(&command, "Bot has not connected");
-            return;
-        };
+        match command {
+            BotCommand::StartNickRoller { config } => {
+                let Some(client) = self.client.clone() else {
+                    self.emit_nick_failure("Bot has not connected");
+                    return;
+                };
+                if !self.spawned {
+                    self.emit_nick_failure("Bot has not spawned");
+                    return;
+                }
+                self.matchmaking.cancel();
+                self.stop_afk(&client);
+                self.last_nick_book = None;
+                let actions = self.nick_roller.handle(NickInput::Start {
+                    config,
+                    now: Instant::now(),
+                });
+                self.apply_nick_actions(Some(&client), actions);
+            }
+            BotCommand::StopNickRoller => {
+                self.last_nick_book = None;
+                let actions = self.nick_roller.handle(NickInput::Stop);
+                let client = self.client.clone();
+                self.apply_nick_actions(client.as_ref(), actions);
+            }
+            BotCommand::NickDecision { candidate_id, take } => {
+                let actions = self.nick_roller.handle(NickInput::Decision {
+                    candidate_id,
+                    take,
+                    now: Instant::now(),
+                });
+                let client = self.client.clone();
+                self.apply_nick_actions(client.as_ref(), actions);
+            }
+            other => {
+                let Some(client) = self.client.clone() else {
+                    self.emit_not_ready(&other, "Bot has not connected");
+                    return;
+                };
+                self.dispatch_standard(other, &client);
+            }
+        }
+    }
+
+    fn dispatch_standard(&mut self, command: BotCommand, client: &Client) {
         match command {
             BotCommand::SendChat(message) => {
                 if self.spawned {
@@ -310,7 +357,9 @@ impl SessionActor {
                 }
             }
             BotCommand::BeginMatchAttempt(attempt) => {
-                if self.spawned {
+                if self.nick_roller.is_active() {
+                    self.emit_error("nick_roller_active", "Nick Roller is currently active");
+                } else if self.spawned {
                     // 只有需要 pitch verification 時恢復預設視距，避免影響附近玩家偵測。
                     let view_distance = if attempt.requires_pitch_verification {
                         PITCH_VIEW_DISTANCE
@@ -342,6 +391,11 @@ impl SessionActor {
                 }
             }
             BotCommand::CancelMatchAttempt => self.matchmaking.cancel(),
+            BotCommand::StartNickRoller { .. }
+            | BotCommand::StopNickRoller
+            | BotCommand::NickDecision { .. } => {
+                self.emit_error("invalid_command", "Nick Roller command was not dispatched");
+            }
         }
     }
 
@@ -367,12 +421,17 @@ impl SessionActor {
                 false
             }
             SessionInput::Spawn => {
-                let Some(client) = self.client.as_ref() else {
+                let Some(client) = self.client.clone() else {
                     return false;
                 };
                 let first_spawn = !self.spawned;
                 self.spawned = true;
-                if self.afk.start(client, Instant::now()) {
+                if self.nick_roller.is_active() {
+                    let actions = self.nick_roller.handle(NickInput::Spawn {
+                        now: Instant::now(),
+                    });
+                    self.apply_nick_actions(Some(&client), actions);
+                } else if self.afk.start(&client, Instant::now()) {
                     self.emitter.publish(BotEvent::AfkState {
                         bot_id: self.bot_id.clone(),
                         active: true,
@@ -394,20 +453,39 @@ impl SessionActor {
                         message: safe,
                     });
                 }
+                let now = Instant::now();
+                let nick_actions = self.nick_roller.handle(NickInput::Chat {
+                    message: message.clone(),
+                    now,
+                });
+                let client = self.client.clone();
+                self.apply_nick_actions(client.as_ref(), nick_actions);
                 self.matchmaking
-                    .handle_chat(&message, &self.bot_id, &self.emitter, Instant::now());
+                    .handle_chat(&message, &self.bot_id, &self.emitter, now);
                 false
             }
             SessionInput::Tick => {
-                if let Some(client) = self.client.as_ref() {
+                if let Some(client) = self.client.clone() {
                     let now = Instant::now();
-                    self.afk.tick(client, now);
-                    self.matchmaking
-                        .tick(client, now, &self.bot_id, &self.emitter);
+                    if self.nick_roller.is_active() {
+                        if let Some(book) = self.read_nick_book(&client) {
+                            let actions = self.nick_roller.handle(NickInput::Book { book, now });
+                            self.apply_nick_actions(Some(&client), actions);
+                        }
+                        let actions = self.nick_roller.handle(NickInput::Tick { now });
+                        self.apply_nick_actions(Some(&client), actions);
+                    } else {
+                        self.afk.tick(&client, now);
+                        self.matchmaking
+                            .tick(&client, now, &self.bot_id, &self.emitter);
+                    }
                 }
                 false
             }
             SessionInput::Disconnect(reason) => {
+                let actions = self.nick_roller.handle(NickInput::Stop);
+                self.apply_nick_actions(None, actions);
+                self.last_nick_book = None;
                 self.connection_closed = true;
                 self.request_azalea_exit = false;
                 self.shutdown_requested.store(true, Ordering::Release);
@@ -416,6 +494,9 @@ impl SessionActor {
                 true
             }
             SessionInput::ConnectionFailed(message) => {
+                let actions = self.nick_roller.handle(NickInput::Stop);
+                self.apply_nick_actions(None, actions);
+                self.last_nick_book = None;
                 self.connection_closed = true;
                 self.request_azalea_exit = false;
                 self.shutdown_requested.store(true, Ordering::Release);
@@ -426,19 +507,152 @@ impl SessionActor {
     }
 
     fn cleanup(&mut self) {
-        self.spawned = false;
-        self.matchmaking.cancel();
         let client = if self.connection_closed {
             None
         } else {
-            self.client.as_ref()
+            self.client.clone()
         };
-        if self.afk.stop(client) {
+        self.spawned = false;
+        if self.nick_roller.is_active() {
+            let actions = self.nick_roller.handle(NickInput::Stop);
+            self.apply_nick_actions(client.as_ref(), actions);
+        }
+        self.last_nick_book = None;
+        self.matchmaking.cancel();
+        if self.afk.stop(client.as_ref()) {
             self.emitter.publish(BotEvent::AfkState {
                 bot_id: self.bot_id.clone(),
                 active: false,
             });
         }
+    }
+
+    fn apply_nick_actions(&mut self, client: Option<&Client>, actions: Vec<NickAction>) {
+        let mut terminal = false;
+        for action in actions {
+            match action {
+                NickAction::SendChat(message) => {
+                    if self.spawned {
+                        if let Some(client) = client {
+                            client.chat(message);
+                        }
+                    }
+                }
+                NickAction::State { phase, message } => {
+                    terminal |= phase.is_terminal();
+                    self.emitter.publish(BotEvent::NickRollerState {
+                        bot_id: self.bot_id.clone(),
+                        phase,
+                        message,
+                    });
+                }
+                NickAction::Candidate {
+                    candidate_id,
+                    nick,
+                    accepted,
+                    reasons,
+                    processed_count,
+                    accepted_count,
+                    rejected_count,
+                    decision_timeout_ms,
+                } => self.emitter.publish(BotEvent::NickCandidate {
+                    bot_id: self.bot_id.clone(),
+                    candidate_id,
+                    nick,
+                    accepted,
+                    reasons,
+                    processed_count,
+                    accepted_count,
+                    rejected_count,
+                    decision_timeout_ms,
+                }),
+                NickAction::Verification {
+                    candidate_id,
+                    expected_nick,
+                    actual_nick,
+                    success,
+                    reason,
+                    processed_count,
+                } => self.emitter.publish(BotEvent::NickVerification {
+                    bot_id: self.bot_id.clone(),
+                    candidate_id,
+                    expected_nick,
+                    actual_nick,
+                    success,
+                    reason,
+                    processed_count,
+                }),
+                NickAction::Attention { code, message } => {
+                    self.emitter.publish(BotEvent::NickAttention {
+                        bot_id: self.bot_id.clone(),
+                        code,
+                        message,
+                    });
+                }
+            }
+        }
+
+        if terminal {
+            self.last_nick_book = None;
+            self.start_afk_if_ready(client);
+        }
+    }
+
+    fn start_afk_if_ready(&mut self, client: Option<&Client>) {
+        let Some(client) = client else {
+            return;
+        };
+        if self.spawned && !self.nick_roller.is_active() && self.afk.start(client, Instant::now()) {
+            self.emitter.publish(BotEvent::AfkState {
+                bot_id: self.bot_id.clone(),
+                active: true,
+            });
+        }
+    }
+
+    fn stop_afk(&mut self, client: &Client) {
+        if self.afk.stop(Some(client)) {
+            self.emitter.publish(BotEvent::AfkState {
+                bot_id: self.bot_id.clone(),
+                active: false,
+            });
+        }
+    }
+
+    fn read_nick_book(&mut self, client: &Client) -> Option<NickBook> {
+        let item = client
+            .get_inventory()
+            .slots()?
+            .into_iter()
+            .find(|item| item.kind() == ItemKind::WrittenBook);
+        let Some(item) = item else {
+            self.last_nick_book = None;
+            return None;
+        };
+        if self.last_nick_book.as_ref() == Some(&item) {
+            return None;
+        }
+        self.last_nick_book = Some(item.clone());
+        let pages = item
+            .get_component::<WrittenBookContent>()
+            .map(|content| {
+                content
+                    .pages
+                    .iter()
+                    .map(|page| page.filtered.as_ref().unwrap_or(&page.raw).to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        Some(NickBook { pages })
+    }
+
+    fn emit_nick_failure(&self, message: &str) {
+        self.emitter.publish(BotEvent::NickRollerState {
+            bot_id: self.bot_id.clone(),
+            phase: NickRollerPhase::Failed,
+            message: Some(message.to_owned()),
+        });
+        self.emit_error("nick_not_ready", message);
     }
 
     fn emit_not_ready(&self, command: &BotCommand, message: &str) {

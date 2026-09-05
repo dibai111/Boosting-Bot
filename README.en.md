@@ -18,6 +18,7 @@ Botting brings Minecraft account management, bot lifecycle control, server targe
 - **Account management**: Add Minecraft accounts with Microsoft login, access tokens, or cookies.
 - **Bot control**: Start or stop bots individually or in batches, with an independent server target for each account.
 - **Matchmaking sessions**: Support BedWars, Duels, and SkyWars workflows.
+- **Nick Roller**: Filter and apply Hypixel nicknames in a standalone mode; Matching is locked while it runs.
 - **Live logs**: Monitor bot state, chat, matchmaking progress, and session logs.
 - **Desktop controls**: Use shortcuts, a floating matchmaking overlay, theme switching, and log export.
 
@@ -84,6 +85,7 @@ pnpm tauri:build
 2. Open **Accounts** and add a Microsoft account or import a token/cookie.
 3. Configure server targets in **Bots** and select the bots to run.
 4. Choose a game mode and matchmaking count in **Matchmaking**.
-5. Monitor live state and export logs from **Sessions**.
+5. Or select online bots and configure nickname rules in **Nick Roller**; the two operation modes cannot run together.
+6. Monitor live state and export logs from **Sessions**.
 
 Only use Minecraft accounts and servers that you are authorized to use, and follow the rules of the relevant services.

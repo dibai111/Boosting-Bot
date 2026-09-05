@@ -4,6 +4,7 @@ mod detection;
 mod engine;
 mod events;
 mod model;
+mod nick_roller;
 mod session;
 
 use anyhow::{bail, Context, Result};
@@ -15,8 +16,9 @@ use std::{
 pub(crate) use events::BotEventBus;
 pub(crate) use model::{
     BotCommand, BotConfig, BotEvent, BotGamePhase, BotPhase, DuelPitchDirection, GameKind,
-    GameMode, MatchAttempt,
+    GameMode, MatchAttempt, RuntimeMode,
 };
+pub(crate) use nick_roller::NickRollerConfig;
 
 pub(crate) struct BotRuntime {
     inner: Arc<RuntimeInner>,

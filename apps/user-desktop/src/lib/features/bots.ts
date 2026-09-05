@@ -3,6 +3,7 @@ import type {
   Account,
   BotPhase,
   MatchmakingSnapshot,
+  RuntimeMode,
   SessionLogEntry,
   BotEvent,
 } from "../models/types";
@@ -20,6 +21,7 @@ export interface BotFeatureState {
   accounts: Account[];
   selectedBotIds: Set<string>;
   phases: Record<string, BotPhase>;
+  activeMode: RuntimeMode;
   stoppingBotIds: Set<string>;
   matchmaking: MatchmakingSnapshot;
   matchmakingBusy: boolean;
@@ -178,6 +180,8 @@ export function createBotFeature(deps: BotFeatureDependencies) {
         const message = event.message === "Stopped from Botting" ? "Stopped" : event.message || deps.phaseLabel(event.phase);
         deps.addLog(message, event.bot_id, event.phase === "error" ? "error" : "info");
       }
+    } else if (event.type === "runtime_mode") {
+      deps.patchState({ activeMode: event.mode });
     } else if (event.type === "profile") {
       deps.patchState({
         accounts: state.accounts.map((account) => account.id === event.bot_id

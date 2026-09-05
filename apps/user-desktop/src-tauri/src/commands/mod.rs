@@ -2,6 +2,7 @@ pub(crate) mod account;
 pub(crate) mod bot;
 pub(crate) mod file;
 pub(crate) mod matchmaking;
+pub(crate) mod nick;
 pub(crate) mod overlay;
 pub(crate) mod settings;
 pub(crate) mod shortcut;

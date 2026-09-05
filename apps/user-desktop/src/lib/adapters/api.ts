@@ -7,6 +7,8 @@ import type {
   MatchmakingDiagnostic,
   MatchmakingSnapshot,
   StartMatchmakingInput,
+  RuntimeMode,
+  StartNickRollerInput,
 } from "../models/types";
 
 export type UserSettings = Record<string, string>;
@@ -55,6 +57,22 @@ export const api = {
 
   async stopMatchmaking(): Promise<MatchmakingSnapshot> {
     return invoke("stop_matchmaking");
+  },
+
+  async startNickRoller(input: StartNickRollerInput): Promise<RuntimeMode> {
+    return invoke("start_nick_roller", { input });
+  },
+
+  async stopNickRoller(): Promise<void> {
+    return invoke("stop_nick_roller");
+  },
+
+  async answerNickDecision(botId: string, candidateId: number, take: boolean): Promise<void> {
+    return invoke("answer_nick_decision", { botId, candidateId, take });
+  },
+
+  async activeMode(): Promise<RuntimeMode> {
+    return invoke("get_active_mode");
   },
 
   async showMatchmakingOverlay(botCount: number): Promise<void> {

@@ -1,3 +1,4 @@
+use super::nick_roller::{NickRollerConfig, NickRollerPhase};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -149,6 +150,14 @@ pub(crate) enum BotPhase {
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+pub(crate) enum RuntimeMode {
+    Idle,
+    Matching,
+    NickRoller,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum BotGamePhase {
     Started,
     Ended,
@@ -195,11 +204,17 @@ pub(crate) enum BotCommand {
     ReturnToLobby,
     PrepareMatchRetry { request_id: String },
     CancelMatchAttempt,
+    StartNickRoller { config: NickRollerConfig },
+    StopNickRoller,
+    NickDecision { candidate_id: u64, take: bool },
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum BotEvent {
+    RuntimeMode {
+        mode: RuntimeMode,
+    },
     Status {
         bot_id: String,
         phase: BotPhase,
@@ -221,6 +236,36 @@ pub(crate) enum BotEvent {
         username: Option<String>,
         uuid: Option<String>,
         error: Option<String>,
+    },
+    NickRollerState {
+        bot_id: String,
+        phase: NickRollerPhase,
+        message: Option<String>,
+    },
+    NickCandidate {
+        bot_id: String,
+        candidate_id: u64,
+        nick: String,
+        accepted: bool,
+        reasons: Vec<String>,
+        processed_count: u32,
+        accepted_count: u32,
+        rejected_count: u32,
+        decision_timeout_ms: Option<u64>,
+    },
+    NickVerification {
+        bot_id: String,
+        candidate_id: u64,
+        expected_nick: String,
+        actual_nick: Option<String>,
+        success: bool,
+        reason: String,
+        processed_count: u32,
+    },
+    NickAttention {
+        bot_id: String,
+        code: String,
+        message: String,
     },
     AfkState {
         bot_id: String,

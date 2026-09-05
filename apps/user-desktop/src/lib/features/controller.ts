@@ -13,8 +13,9 @@ import type {
   BotPhase,
   GameKind,
   GameMode,
-  MatchmakingSnapshot,
-  SessionLogEntry,
+    MatchmakingSnapshot,
+    RuntimeMode,
+    SessionLogEntry,
 } from "../models/types";
 
 type FeatureState = AppEntryFeatureState & BotFeatureState & MatchmakingFeatureState;
@@ -65,6 +66,7 @@ export function createUserAppController(options: UserAppControllerOptions) {
     accounts: [],
     selectedBotIds: new Set<string>(),
     phases: {},
+    activeMode: "idle" as RuntimeMode,
     stoppingBotIds: new Set<string>(),
     matchmaking: idleMatchmaking,
     matchmakingBusy: false,
@@ -119,6 +121,10 @@ export function createUserAppController(options: UserAppControllerOptions) {
 
   function setPhases(phases: Record<string, BotPhase>): void {
     patchState({ phases });
+  }
+
+  function setActiveMode(activeMode: RuntimeMode): void {
+    patchState({ activeMode });
   }
 
   function setSelectedBotIds(selectedBotIds: Set<string>): void {
@@ -213,6 +219,7 @@ export function createUserAppController(options: UserAppControllerOptions) {
     selectMatchGame,
     selectMatchMode,
     saveServerFor: bots.saveServerFor,
+    setActiveMode,
     setAccounts,
     setDeviceLinkError,
     setMatchLogPath,

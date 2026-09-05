@@ -192,7 +192,6 @@ nav button.active { color: #ffffff; background: #389df6; }
   transition: background-color 240ms ease-out;
 }
 .sidebar-nav-list.open .sidebar-nav-list-inner { background: rgba(231, 238, 245, .58); }
-.sidebar-nav-list-inner.compact { max-height: 60px; }
 .sidebar-nav-list-inner::-webkit-scrollbar { width: 0; height: 0; }
 nav .sidebar-nav-option {
   min-width: 0;

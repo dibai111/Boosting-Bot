@@ -1,6 +1,7 @@
 use super::UserRuntime;
 use crate::{
     app_state::CommandResult,
+    bot_runtime::RuntimeMode,
     matchmaking::{MatchmakingPlan, MatchmakingSnapshot, StartMatchmakingInput},
 };
 
@@ -19,14 +20,22 @@ impl UserRuntime {
                 .map(|account| (account.id.clone(), account.username.clone())),
         )
         .map_err(|error| error.to_string())?;
-        self.matchmaking
+        self.reconcile_active_mode().await;
+        self.enter_mode(RuntimeMode::Matching).await?;
+        let result = self
+            .matchmaking
             .start(plan)
             .await
-            .map_err(|error| format!("start matchmaking: {error:#}"))
+            .map_err(|error| format!("start matchmaking: {error:#}"));
+        if result.is_err() {
+            self.leave_mode(RuntimeMode::Matching).await;
+        }
+        result
     }
 
     pub(crate) async fn stop_matchmaking(&self) -> MatchmakingSnapshot {
         self.matchmaking.stop().await;
+        self.leave_mode(RuntimeMode::Matching).await;
         self.matchmaking.snapshot().await
     }
 

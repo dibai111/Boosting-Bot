@@ -87,10 +87,11 @@ export function createMatchmakingFeature(deps: MatchmakingFeatureDependencies) {
 
   function handleMatchmakingState(next: MatchmakingSnapshot): void {
     const previous = deps.getState().matchmaking;
-    for (const entry of matchmakingTransitionLogs(previous, next)) {
+    const transitionLogs = matchmakingTransitionLogs(previous, next);
+    deps.patchState({ matchmaking: next });
+    for (const entry of transitionLogs) {
       deps.addLog(entry.message, entry.botId, entry.level);
     }
-    deps.patchState({ matchmaking: next });
     if (previous.phase !== "idle" && next.phase === "idle") {
       void deps.api.hideMatchmakingOverlay();
     }
@@ -101,6 +102,7 @@ export function createMatchmakingFeature(deps: MatchmakingFeatureDependencies) {
     const botIds = state.accounts
       .filter((account) => state.selectedBotIds.has(account.id) && state.phases[account.id] === "online")
       .map((account) => account.id);
+    const botIdSet = new Set(botIds);
     if (!botIds.length) {
       deps.showToast(deps.translate("onlineBotRequired"), "error");
       return;
@@ -121,7 +123,7 @@ export function createMatchmakingFeature(deps: MatchmakingFeatureDependencies) {
         mode: state.matchMode,
         bot_ids: botIds,
         bot_usernames: Object.fromEntries(state.accounts
-          .filter((account) => botIds.includes(account.id) && account.username.trim())
+          .filter((account) => botIdSet.has(account.id) && account.username.trim())
           .map((account) => [account.id, account.username.trim()])),
         verify_presence: state.verifyPresence,
         verify_duel_pitch: state.verifyDuelPitch,

@@ -1,5 +1,8 @@
 export type AuthKind = "microsoft" | "access_token" | "cookie";
 export type BotPhase = "offline" | "starting" | "authenticating" | "connecting" | "online" | "stopping" | "error";
+export type RuntimeMode = "idle" | "matching" | "nick_roller";
+export type NickRollerPhase = "idle" | "preparing" | "rolling" | "awaiting_decision" | "verifying" | "finished" | "failed" | "stopped";
+export type NickContainsMatchMode = "any" | "all";
 export type GameKind = "bedwars" | "duels" | "skywars";
 export type GameMode =
   | "solo"
@@ -71,6 +74,43 @@ export interface StartMatchmakingInput {
   log_path: string;
 }
 
+export interface NickRules {
+  case_sensitive: boolean;
+  exact_length: number | null;
+  min_length: number | null;
+  max_length: number | null;
+  allow_numbers: boolean;
+  allow_underscore: boolean;
+  allow_list: string[];
+  starts_with: string[];
+  ends_with: string[];
+  contains: string[];
+  contains_match_mode: NickContainsMatchMode;
+  starts_with_priority: boolean;
+  ends_with_priority: boolean;
+  contains_priority: boolean;
+  legacy_priority: boolean;
+}
+
+export interface NickRollerConfig {
+  book_timeout_ms: number;
+  next_roll_delay_ms: number;
+  stop_after_found: boolean;
+  show_rejected: boolean;
+  rules: NickRules;
+  sound: {
+    enabled: boolean;
+    volume: number;
+  };
+}
+
+export type NickRollerEngineConfig = Omit<NickRollerConfig, "sound" | "show_rejected">;
+
+export interface StartNickRollerInput {
+  bot_ids: string[];
+  config: NickRollerEngineConfig;
+}
+
 export interface MatchmakingBotState {
   bot_id: string;
   phase: BotMatchPhase;
@@ -97,10 +137,15 @@ export interface MatchmakingDiagnostic {
 }
 
 export type BotEvent =
+  | { type: "runtime_mode"; mode: RuntimeMode }
   | { type: "status"; bot_id: string; phase: BotPhase; message?: string | null }
   | { type: "profile"; bot_id: string; username: string; uuid?: string | null }
   | { type: "device_code"; request_id: string; user_code: string; verification_uri: string; expires_in?: number | null }
   | { type: "microsoft_auth_result"; request_id: string; username?: string | null; uuid?: string | null; error?: string | null }
+  | { type: "nick_roller_state"; bot_id: string; phase: NickRollerPhase; message?: string | null }
+  | { type: "nick_candidate"; bot_id: string; candidate_id: number; nick: string; accepted: boolean; reasons: string[]; processed_count: number; accepted_count: number; rejected_count: number; decision_timeout_ms?: number | null }
+  | { type: "nick_verification"; bot_id: string; candidate_id: number; expected_nick: string; actual_nick?: string | null; success: boolean; reason: string; processed_count: number }
+  | { type: "nick_attention"; bot_id: string; code: string; message: string }
   | { type: "afk_state"; bot_id: string; active: boolean }
   | { type: "match_attempt_result"; bot_id: string; session_id: string; round_id: string; target_generation: number; attempt_id: string; server: string }
   | { type: "match_attempt_failed"; bot_id: string; session_id: string; round_id: string; target_generation: number; attempt_id: string; code: string; message: string }

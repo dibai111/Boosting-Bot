@@ -71,6 +71,11 @@ impl MatchmakingSession {
         self.state.lock().await.snapshot.clone()
     }
 
+    pub(crate) async fn phase(&self) -> MatchmakingPhase {
+        // 模式判斷只需要階段，避免複製所有 bot 的快照資料。
+        self.state.lock().await.snapshot.phase
+    }
+
     pub async fn start(self: &Arc<Self>, plan: MatchmakingPlan) -> Result<MatchmakingSnapshot> {
         let _lifecycle = self.lifecycle.lock().await;
         let path = tokio::fs::canonicalize(PathBuf::from(plan.log_path()))
