@@ -1,3 +1,18 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 baibai and Botting contributors
+ *
+ * Botting is free software: you can redistribute it and/or modify it under
+ * the GNU Affero General Public License version 3, as published by the
+ * Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ * PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+ * Copyleft: covered modifications must retain these license obligations.
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+
+//! 安排 Limbo 準備及延後重試，以 generation 和 request_id 過濾過期回覆。
+
 use super::super::{BotMatchPhase, MatchmakingPhase};
 use super::flow::{possible_matches, retry_message};
 use super::state::PendingRetry;
@@ -8,6 +23,13 @@ use std::time::Duration;
 use uuid::Uuid;
 
 impl MatchmakingSession {
+    /// 移除目前嘗試並安排立即重試或 Limbo 準備。
+    /// @param bot_id 本機 Bot ID。
+    /// @param server 上次觀察到的伺服器。
+    /// @param message 重試原因。
+    /// @param retry_delay 重新排隊前等待時間。
+    /// @param prepare_limbo 是否先等待 Limbo 確認。
+    /// @return 無回傳值；已提交或沒有有效嘗試時忽略。
     pub(crate) async fn schedule_retry(
         self: &Arc<Self>,
         bot_id: &str,
@@ -18,6 +40,12 @@ impl MatchmakingSession {
     ) {
         let (should_fail, request_id, generation, snapshot) = {
             let mut state = self.state.lock().await;
+            // 逾時檢查與取得此鎖之間可能已提交或撤回；不可重新排入已結束的嘗試。
+            if state.snapshot.phase != MatchmakingPhase::Matching
+                || !state.active_attempts.contains_key(bot_id)
+            {
+                return;
+            }
             state.active_attempts.remove(bot_id);
             state.presence_checks.remove(bot_id);
             state.duel_pitch_checks.remove(bot_id);
@@ -73,6 +101,10 @@ impl MatchmakingSession {
             .await;
     }
 
+    /// 核對重試 request_id 及世代，再排程下一次嘗試。
+    /// @param bot_id 本機 Bot ID。
+    /// @param request_id Bot 回報已完成準備的 request ID。
+    /// @return 無回傳值；過期回應忽略。
     pub(crate) async fn handle_match_retry_ready(self: &Arc<Self>, bot_id: &str, request_id: &str) {
         let (generation, retry_delay, snapshot) = {
             let mut state = self.state.lock().await;
@@ -102,6 +134,11 @@ impl MatchmakingSession {
         self.spawn_retry(bot_id.to_owned(), generation, retry_delay);
     }
 
+    /// 以弱參照建立延遲重試任務。
+    /// @param bot_id 本機 Bot ID。
+    /// @param generation 排程時的目標世代。
+    /// @param retry_delay 重試前等待時間。
+    /// @return 無回傳值；協調器已釋放時不執行。
     pub(crate) fn spawn_retry(
         self: &Arc<Self>,
         bot_id: String,
@@ -117,6 +154,11 @@ impl MatchmakingSession {
         });
     }
 
+    /// 只接受目前重試要求的失敗回應。
+    /// @param bot_id 本機 Bot ID。
+    /// @param request_id 準備要求 ID。
+    /// @param message 準備失敗原因。
+    /// @return 無回傳值；有效回應會將 Bot 標成不可用。
     pub(crate) async fn handle_match_retry_preparation_failure(
         &self,
         bot_id: &str,
@@ -139,6 +181,10 @@ impl MatchmakingSession {
         }
     }
 
+    /// 確認世代及 Bot 階段後產生新嘗試 ID 並重新排隊。
+    /// @param bot_id 本機 Bot ID。
+    /// @param generation 排程時的目標世代。
+    /// @return 無回傳值；已結束或取代的重試忽略。
     pub(crate) async fn retry_bot(&self, bot_id: &str, generation: u64) {
         let (command, snapshot) = {
             let mut state = self.state.lock().await;

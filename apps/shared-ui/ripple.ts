@@ -1,3 +1,17 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 baibai and Botting contributors
+ *
+ * Botting is free software: you can redistribute it and/or modify it under
+ * the GNU Affero General Public License version 3, as published by the
+ * Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ * PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+ * Copyleft: covered modifications must retain these license obligations.
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+
+/** 將點擊位置轉成按鈕漣漪；鍵盤觸發時改用按鈕中心。 */
 export interface RippleOptions {
   rippleColor?: string;
   durationMs?: number;
@@ -5,6 +19,12 @@ export interface RippleOptions {
 
 type RippleElement = HTMLElement & { __bottingRippleCleanup?: () => void };
 
+/**
+ * 將滑鼠或鍵盤點擊轉成短暫漣漪。
+ * @param node 套用效果的 DOM 元素。
+ * @param options 漣漪顏色及持續時間。
+ * @return Svelte action 的 update 與 destroy 介面。
+ */
 export function ripple(node: HTMLElement, options: RippleOptions = {}) {
   let currentOptions = options;
   const element = node as RippleElement;
@@ -15,7 +35,8 @@ export function ripple(node: HTMLElement, options: RippleOptions = {}) {
   }
 
   function handleClick(event: MouseEvent): void {
-    if (node.matches(":disabled") || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (node.matches(":disabled") || window.matchMedia("(prefers-reduced-motion: reduce)").matches)
+      return;
 
     const bounds = node.getBoundingClientRect();
     const size = Math.max(bounds.width, bounds.height) * 2.2;

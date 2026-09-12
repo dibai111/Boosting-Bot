@@ -1,3 +1,18 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 baibai and Botting contributors
+ *
+ * Botting is free software: you can redistribute it and/or modify it under
+ * the GNU Affero General Public License version 3, as published by the
+ * Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ * PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+ * Copyleft: covered modifications must retain these license obligations.
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+
+//! 管理每輪目標伺服器、轉服結果及最低配對數量，達標後撤回其餘 Bot。
+
 use super::super::detector::real_name_joined_log;
 use super::super::modes::{bedwars, duels};
 use super::super::{BotMatchPhase, MatchmakingPhase};
@@ -12,6 +27,9 @@ use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 impl MatchmakingSession {
+    /// 根據玩家轉服訊息啟動新輪次或重設目標。
+    /// @param server 已解析的玩家遊戲伺服器 ID。
+    /// @return 無回傳值；不相關轉服不更新狀態。
     pub(crate) async fn handle_player_server(self: &Arc<Self>, server: String) {
         let current = {
             let state = self.state.lock().await;
@@ -34,12 +52,18 @@ impl MatchmakingSession {
         }
     }
 
+    /// 撤回舊目標的 Bot，再為玩家新伺服器建立輪次。
+    /// @param server 新的玩家遊戲伺服器 ID。
+    /// @return 無回傳值；狀態改變透過快照通知。
     pub(crate) async fn restart_for_new_player_server(self: &Arc<Self>, server: String) {
         self.reset_for_lobby("Player server changed; restarting matchmaking")
             .await;
         self.start_round(server).await;
     }
 
+    /// 產生新輪次與嘗試 ID，將所選 Bot 送入遊戲佇列。
+    /// @param player_server 本輪要比對的玩家伺服器。
+    /// @return 無回傳值；沒有配對計畫時忽略。
     pub(crate) async fn start_round(self: &Arc<Self>, player_server: String) {
         let (commands, snapshot) = {
             let mut state = self.state.lock().await;
@@ -93,6 +117,14 @@ impl MatchmakingSession {
         }
     }
 
+    /// 檢查來源識別碼，再依遊戲模式決定驗證或重試。
+    /// @param bot_id 本機 Bot ID。
+    /// @param round_id 目前配對輪次 ID。
+    /// @param generation 目標世代編號。
+    /// @param attempt_id 單次嘗試 ID。
+    /// @param session_id 整個配對工作階段 ID。
+    /// @param server Bot 實際轉入的伺服器。
+    /// @return 無回傳值；過期結果不更新狀態。
     pub(crate) async fn handle_attempt_result(
         self: &Arc<Self>,
         bot_id: &str,
@@ -244,6 +276,14 @@ impl MatchmakingSession {
         }
     }
 
+    /// 只對目前嘗試安排重試，指令節流錯誤會加入延遲。
+    /// @param bot_id 本機 Bot ID。
+    /// @param round_id 目前配對輪次 ID。
+    /// @param generation 目標世代編號。
+    /// @param attempt_id 單次嘗試 ID。
+    /// @param code 穩定錯誤代碼。
+    /// @param message 服務端或工作階段提供的失敗原因。
+    /// @return 無回傳值；無效嘗試忽略。
     pub(crate) async fn handle_attempt_failure(
         self: &Arc<Self>,
         bot_id: &str,
@@ -267,6 +307,12 @@ impl MatchmakingSession {
         }
     }
 
+    /// 同時核對配對階段、輪次、世代與嘗試 ID。
+    /// @param bot_id 本機 Bot ID。
+    /// @param round_id 目前配對輪次 ID。
+    /// @param generation 目標世代編號。
+    /// @param attempt_id 單次嘗試 ID。
+    /// @return 全部識別資訊仍有效時為 true。
     pub(crate) async fn is_current_attempt(
         &self,
         bot_id: &str,
@@ -284,9 +330,19 @@ impl MatchmakingSession {
                 .is_some_and(|current| current == attempt_id)
     }
 
+    /// 確認有效 Bot，達到最低數量後提交本輪並撤回其他 Bot。
+    /// @param bot_id 本機 Bot ID。
+    /// @param server 已確認的伺服器；名稱驗證模式可為 None。
+    /// @return 無回傳值；重複或已撤回的確認會忽略。
     pub(crate) async fn mark_matched(&self, bot_id: &str, server: Option<&str>) {
         let (snapshot, withdraw) = {
             let mut state = self.state.lock().await;
+            // 達標後撤回的 Bot 或重複確認，不可再改寫已提交的配對結果。
+            if state.snapshot.phase != MatchmakingPhase::Matching
+                || !state.active_attempts.contains_key(bot_id)
+            {
+                return;
+            }
             state.active_attempts.remove(bot_id);
             state.presence_checks.remove(bot_id);
             state.duel_pitch_checks.remove(bot_id);
@@ -322,6 +378,7 @@ impl MatchmakingSession {
                 }
                 state.active_attempts.clear();
                 state.retry_requests.clear();
+                state.presence_checks.clear();
                 state.duel_pitch_checks.clear();
                 state.duel_pitch_observations.clear();
             }

@@ -1,4 +1,18 @@
+<!--
+SPDX-License-Identifier: AGPL-3.0-only
+Copyright (C) 2026 baibai and Botting contributors
+
+Botting is free software: you can redistribute it and/or modify it under
+the GNU Affero General Public License version 3, as published by the
+Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+Copyleft: covered modifications must retain these license obligations.
+https://www.gnu.org/licenses/agpl-3.0.html
+-->
+
 <script lang="ts">
+  // 以逐字延遲呈現品牌文字，並為螢幕閱讀器保留完整字串。
   export let text = "";
   export let colors: string[] = ["#258DE9", "#389DF6", "#CCE4FF"];
   export let className = "";
@@ -22,8 +36,8 @@
       class:paused
       class="dia-text-reveal__letter"
       style={`--dia-index: ${index};`}
-      aria-hidden="true"
-    >{character === " " ? "\u00a0" : character}</span>
+      aria-hidden="true">{character === " " ? "\u00a0" : character}</span
+    >
   {/each}
 </span>
 
@@ -49,8 +63,9 @@
     backface-visibility: hidden;
     will-change: transform, opacity, filter, background-position;
     animation:
-      dia-letter-reveal var(--dia-reveal-duration) cubic-bezier(.16, 1, .3, 1) calc(var(--dia-index) * var(--dia-letter-delay)) forwards,
-      dia-gradient-sweep var(--dia-gradient-duration) cubic-bezier(.16, 1, .3, 1) both;
+      dia-letter-reveal var(--dia-reveal-duration) cubic-bezier(0.16, 1, 0.3, 1)
+        calc(var(--dia-index) * var(--dia-letter-delay)) forwards,
+      dia-gradient-sweep var(--dia-gradient-duration) cubic-bezier(0.16, 1, 0.3, 1) both;
   }
 
   .dia-text-reveal__letter.paused {
@@ -76,9 +91,15 @@
   }
 
   @keyframes dia-gradient-sweep {
-    0% { background-position: 0% 50%; }
-    68% { background-position: 100% 50%; }
-    100% { background-position: 50% 50%; }
+    0% {
+      background-position: 0% 50%;
+    }
+    68% {
+      background-position: 100% 50%;
+    }
+    100% {
+      background-position: 50% 50%;
+    }
   }
 
   @media (prefers-reduced-motion: reduce) {

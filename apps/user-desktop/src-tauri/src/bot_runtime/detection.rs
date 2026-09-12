@@ -1,3 +1,18 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 baibai and Botting contributors
+ *
+ * Botting is free software: you can redistribute it and/or modify it under
+ * the GNU Affero General Public License version 3, as published by the
+ * Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ * PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+ * Copyleft: covered modifications must retain these license obligations.
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+
+//! 轉換可見聊天訊號並追蹤穩定俯仰手勢，輸出前另行遮蔽敏感聊天內容。
+
 use super::{BotGamePhase, DuelPitchDirection, GameKind};
 use crate::hypixel::{parse_visible_chat, VisibleChatSignal};
 use std::{collections::HashMap, time::Duration, time::Instant};
@@ -6,6 +21,10 @@ const PITCH_THRESHOLD_DEGREES: f32 = 80.0;
 const PITCH_STABLE_DURATION: Duration = Duration::from_millis(250);
 const PITCH_EMIT_COOLDOWN: Duration = Duration::from_secs(1);
 
+/// 將共用聊天訊號限制為指定遊戲的開始／結束事件。
+/// @param kind 目前配對的遊戲種類。
+/// @param message 伺服器聊天文字。
+/// @return 遊戲階段；無關訊息為 None。
 pub(super) fn game_state(kind: GameKind, message: &str) -> Option<BotGamePhase> {
     match parse_visible_chat(message) {
         Some(VisibleChatSignal::GameStarted(observed_kind)) if observed_kind == kind => {
@@ -19,6 +38,9 @@ pub(super) fn game_state(kind: GameKind, message: &str) -> Option<BotGamePhase> 
     }
 }
 
+/// 辨識服務端的 Limbo 已生成確認。
+/// @param message 可見聊天文字。
+/// @return 確認訊號符合時為 true。
 pub(super) fn limbo_spawn(message: &str) -> bool {
     matches!(
         parse_visible_chat(message),
@@ -26,6 +48,9 @@ pub(super) fn limbo_spawn(message: &str) -> bool {
     )
 }
 
+/// 擷取已辨識的 mini 遊戲伺服器轉服訊號。
+/// @param message 可見聊天文字。
+/// @return 伺服器 ID；非轉服訊息為 None。
 pub(super) fn server_transfer(message: &str) -> Option<String> {
     match parse_visible_chat(message) {
         Some(VisibleChatSignal::ServerTransfer(server)) => Some(server),
@@ -33,6 +58,9 @@ pub(super) fn server_transfer(message: &str) -> Option<String> {
     }
 }
 
+/// 取得共用解析器辨識的佇列人數。
+/// @param message 可見聊天文字。
+/// @return 目前人數及總容量；無效訊息為 None。
 pub(super) fn queue_progress(message: &str) -> Option<(u32, u32)> {
     match parse_visible_chat(message) {
         Some(VisibleChatSignal::QueueProgress { current, total, .. }) => Some((current, total)),
@@ -40,6 +68,9 @@ pub(super) fn queue_progress(message: &str) -> Option<(u32, u32)> {
     }
 }
 
+/// 辨識服務端的指令頻率限制。
+/// @param message 可見聊天文字。
+/// @return 拒絕原因；無關訊息為 None。
 pub(super) fn command_rejection(message: &str) -> Option<String> {
     match parse_visible_chat(message) {
         Some(VisibleChatSignal::CommandRejected(message)) => Some(message),
@@ -47,6 +78,9 @@ pub(super) fn command_rejection(message: &str) -> Option<String> {
     }
 }
 
+/// 過濾內部忙碌訊息，並遮蔽常見權杖及 Cookie 片段。
+/// @param message 待顯示的原始聊天文字。
+/// @return 可見文字或 REDACTED；空白及內部訊息為 None。
 pub(super) fn safe_chat(message: &str) -> Option<String> {
     let plain = collapse_whitespace(message);
     if plain.eq_ignore_ascii_case("You are currently BUSY") {
@@ -65,6 +99,9 @@ pub(super) fn safe_chat(message: &str) -> Option<String> {
     (!plain.is_empty()).then_some(plain)
 }
 
+/// 移除斷線訊息中的空行、網址及 Ban ID 說明。
+/// @param message 服務端提供的可選斷線原因。
+/// @return 供 UI 顯示的單行原因。
 pub(super) fn disconnect_reason(message: Option<&str>) -> String {
     let Some(message) = message else {
         return "Disconnected by server".to_owned();
@@ -89,6 +126,9 @@ pub(super) fn disconnect_reason(message: Option<&str>) -> String {
     }
 }
 
+/// 將封禁與一般踢出分類為固定錯誤代碼。
+/// @param message 已整理的斷線原因。
+/// @return banned 或 kicked。
 pub(super) fn disconnect_code(message: &str) -> &'static str {
     let normalized = message.to_ascii_lowercase();
     if normalized.contains("banned") || normalized.contains("ban id") {
@@ -98,6 +138,7 @@ pub(super) fn disconnect_code(message: &str) -> &'static str {
     }
 }
 
+/// 按實體 ID 記住中立角度、手勢穩定時間及發送冷卻。
 pub(super) struct PitchTracker {
     states: HashMap<i32, PitchState>,
 }
@@ -110,16 +151,25 @@ struct PitchState {
 }
 
 impl PitchTracker {
+    /// 建立沒有玩家觀察資料的俯仰追蹤器。
+    /// @return 空的 PitchTracker。
     pub(super) fn new() -> Self {
         Self {
             states: HashMap::new(),
         }
     }
 
+    /// 清除所有實體的觀察與冷卻狀態。
+    /// @return 無回傳值；下一輪需重新觀察中立角度。
     pub(super) fn reset(&mut self) {
         self.states.clear();
     }
 
+    /// 要求先觀察中立角度，再確認持續的俯仰手勢。
+    /// @param entity_id Minecraft 實體 ID。
+    /// @param pitch 俯仰角，單位為度。
+    /// @param now 本次觀察的單調時間。
+    /// @return 已確認的上下方向；未穩定或冷卻中為 None。
     pub(super) fn observe(
         &mut self,
         entity_id: i32,

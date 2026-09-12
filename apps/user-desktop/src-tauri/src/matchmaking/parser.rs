@@ -1,7 +1,23 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 baibai and Botting contributors
+ *
+ * Botting is free software: you can redistribute it and/or modify it under
+ * the GNU Affero General Public License version 3, as published by the
+ * Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ * PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+ * Copyleft: covered modifications must retain these license obligations.
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+
+//! 只解析玩家記錄中的聊天內容，移除 Minecraft 格式碼後轉成配對事件。
+
 use super::detector::chat_verification;
 use crate::hypixel::{self, VisibleChatSignal};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// 從玩家 Minecraft 日誌解析出的配對相關事件。
 pub enum PlayerLogEvent {
     ServerTransfer(String),
     QueueProgress {
@@ -18,6 +34,9 @@ pub enum PlayerLogEvent {
     GameEnded,
 }
 
+/// 只處理 CHAT 區段，移除格式碼後辨識配對訊號。
+/// @param line 單行 Minecraft 玩家日誌。
+/// @return 已辨識事件；非聊天或無關內容為 None。
 pub fn parse_player_log_line(line: &str) -> Option<PlayerLogEvent> {
     let payload = chat_payload(line)?;
     let plain = strip_formatting(payload);

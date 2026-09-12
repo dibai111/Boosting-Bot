@@ -1,4 +1,18 @@
+<!--
+SPDX-License-Identifier: AGPL-3.0-only
+Copyright (C) 2026 baibai and Botting contributors
+
+Botting is free software: you can redistribute it and/or modify it under
+the GNU Affero General Public License version 3, as published by the
+Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+Copyleft: covered modifications must retain these license obligations.
+https://www.gnu.org/licenses/agpl-3.0.html
+-->
+
 <script lang="ts">
+  // 呈現 Bot 狀態並編輯伺服器地址；選取區與輸入欄分開接收操作。
   import MinecraftSkin from "../minecraft/MinecraftSkin.svelte";
   import HexagonPattern from "../../../../../shared-ui/HexagonPattern.svelte";
 
@@ -13,10 +27,7 @@
   export let onServerChange: (value: string) => void = () => {};
 </script>
 
-<article
-  class="bot-card"
-  class:selected={selected}
->
+<article class="bot-card" class:selected>
   <HexagonPattern
     className="identity-hexagon-pattern"
     hexagons={[
@@ -43,16 +54,27 @@
       [8, 4],
     ]}
   />
-  <button type="button" class="bot-card-select-area" aria-label={username} aria-pressed={selected} on:click={onSelect}></button>
+  <button
+    type="button"
+    class="bot-card-select-area"
+    aria-label={username}
+    aria-pressed={selected}
+    on:click={onSelect}
+  ></button>
   <header class="bot-card-header">
-    <span class="account-card-status bot-card-status" class:status-dot-only={statusTone === "gray"} aria-label={status} title={status}>
+    <span
+      class="account-card-status bot-card-status"
+      class:status-dot-only={statusTone === "gray"}
+      aria-label={status}
+      title={status}
+    >
       <i class={statusTone}></i>
       {#if statusTone !== "gray"}<span>{status}</span>{/if}
     </span>
   </header>
 
   <div class="bot-card-visual">
-    <MinecraftSkin username={username} profileId={profileId} size={154} />
+    <MinecraftSkin {username} {profileId} size={154} />
   </div>
 
   <div class="bot-card-content">

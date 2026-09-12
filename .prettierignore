@@ -1,0 +1,7 @@
+# 建置產物、套件鎖定檔及 Tauri 產生的結構描述由各自工具管理。
+node_modules/
+target/
+dist/
+apps/user-desktop/src-tauri/gen/
+pnpm-lock.yaml
+Cargo.lock

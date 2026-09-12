@@ -1,3 +1,18 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 baibai and Botting contributors
+ *
+ * Botting is free software: you can redistribute it and/or modify it under
+ * the GNU Affero General Public License version 3, as published by the
+ * Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ * PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+ * Copyleft: covered modifications must retain these license obligations.
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+
+//! 驗證 Nick 設定及目標帳號，追蹤本次篩選的 Bot 集合。
+
 use super::UserRuntime;
 use crate::{
     app_state::CommandResult,
@@ -11,12 +26,16 @@ use serde::Deserialize;
 const MAX_NICK_BOTS: usize = 32;
 
 #[derive(Debug, Deserialize)]
+/// 指定參與 Nick 篩選的帳號 ID 與後端篩選設定。
 pub(crate) struct StartNickRollerInput {
     pub(crate) bot_ids: Vec<String>,
     pub(crate) config: NickRollerConfig,
 }
 
 impl UserRuntime {
+    /// 驗證帳號及 Hypixel 地址後，向所選 Bot 發送篩選指令。
+    /// @param input Bot 清單及篩選設定；ID 會正規化與去重。
+    /// @return 至少一個指令送出成功時回傳 NickRoller，否則回傳錯誤。
     pub(crate) async fn start_nick_roller(
         &self,
         mut input: StartNickRollerInput,
@@ -61,6 +80,8 @@ impl UserRuntime {
         Ok(RuntimeMode::NickRoller)
     }
 
+    /// 向本次追蹤的 Bot 發送停止指令並清空模式追蹤。
+    /// @return 停止請求結果；已關閉的 Bot 通道可忽略。
     pub(crate) async fn stop_nick_roller(&self) -> CommandResult<()> {
         let bot_ids = self
             .nick_bot_ids
@@ -77,6 +98,11 @@ impl UserRuntime {
         Ok(())
     }
 
+    /// 將使用者對候選的決策交回 Bot 狀態機。
+    /// @param bot_id 候選所屬 Bot ID。
+    /// @param candidate_id 事件提供的候選編號。
+    /// @param take true 表示套用，false 表示跳過。
+    /// @return 模式檢查與指令發送結果；候選時效由狀態機檢查。
     pub(crate) async fn answer_nick_decision(
         &self,
         bot_id: String,

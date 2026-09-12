@@ -1,3 +1,17 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 baibai and Botting contributors
+ *
+ * Botting is free software: you can redistribute it and/or modify it under
+ * the GNU Affero General Public License version 3, as published by the
+ * Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ * PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+ * Copyleft: covered modifications must retain these license obligations.
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+
+/** 漣漪置於按鈕內容下方，避免遮擋文字或接收滑鼠事件。 */
 .ripple-button {
   position: relative;
   isolation: isolate;
@@ -14,20 +28,28 @@
   z-index: 0;
   display: block;
   border-radius: 50%;
-  background: var(--ripple-color, #ADD8E6);
-  opacity: .32;
+  background: var(--ripple-color, #add8e6);
+  opacity: 0.32;
   pointer-events: none;
   will-change: transform, opacity;
-  transform: scale(.9);
+  transform: scale(0.9);
   animation: ripple-wave-expand var(--motion-duration-press, 140ms)
-    var(--motion-ease-out, cubic-bezier(.23, 1, .32, 1)) forwards;
+    var(--motion-ease-out, cubic-bezier(0.23, 1, 0.32, 1)) forwards;
 }
 
 @keyframes ripple-wave-expand {
-  0% { opacity: .32; transform: scale(.9); }
-  100% { opacity: 0; transform: scale(1); }
+  0% {
+    opacity: 0.32;
+    transform: scale(0.9);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ripple-wave { display: none; }
+  .ripple-wave {
+    display: none;
+  }
 }

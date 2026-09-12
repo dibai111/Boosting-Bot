@@ -1,7 +1,24 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 baibai and Botting contributors
+ *
+ * Botting is free software: you can redistribute it and/or modify it under
+ * the GNU Affero General Public License version 3, as published by the
+ * Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ * PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+ * Copyleft: covered modifications must retain these license obligations.
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+
+//! 統計目前程序及 WebView 等子程序的專用工作集，避免重複計算程序。
+
 use super::UserRuntime;
 use crate::app_state::CommandResult;
 
 impl UserRuntime {
+    /// 加總主程序及子程序的專用工作集。
+    /// @return 位元組數；非 Windows 或主程序讀取失敗時回傳錯誤。
     pub(crate) async fn app_memory_bytes(&self) -> CommandResult<u64> {
         process_tree_private_working_set(std::process::id()).map_err(|error| error.to_string())
     }
@@ -31,7 +48,7 @@ fn process_private_working_set(process_id: u32) -> std::io::Result<u64> {
         },
     };
 
-    // SAFETY: OS supplies the process id and the null handle is checked before use.
+    // SAFETY: process_id 來自作業系統，使用前會檢查回傳的 handle 是否為空。
     let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id) };
     if process.is_null() {
         return Err(std::io::Error::last_os_error());
@@ -46,7 +63,7 @@ fn process_private_working_set(process_id: u32) -> std::io::Result<u64> {
         cb: counter_size,
         ..Default::default()
     };
-    // SAFETY: process is valid and the base counters pointer refers to the full EX2 buffer.
+    // SAFETY: process 是有效 handle，基底計數器指標指向完整且可寫入的 EX2 結構。
     let succeeded = unsafe {
         GetProcessMemoryInfo(
             process,
@@ -54,10 +71,12 @@ fn process_private_working_set(process_id: u32) -> std::io::Result<u64> {
             counter_size,
         )
     };
-    // SAFETY: process is the handle returned by OpenProcess and is closed exactly once.
+    // 先保存失敗原因，CloseHandle 也可能改寫執行緒的 last-error。
+    let error = (succeeded == 0).then(std::io::Error::last_os_error);
+    // SAFETY: process 由 OpenProcess 回傳，並在此處恰好關閉一次。
     unsafe { CloseHandle(process) };
-    if succeeded == 0 {
-        return Err(std::io::Error::last_os_error());
+    if let Some(error) = error {
+        return Err(error);
     }
     Ok(counters.PrivateWorkingSetSize as u64)
 }
@@ -73,8 +92,7 @@ fn process_parent_pairs() -> std::io::Result<Vec<(u32, u32)>> {
         },
     };
 
-    // SAFETY: the snapshot is a process list owned by Windows. The returned handle is checked
-    // before it is used and closed exactly once below.
+    // SAFETY: 系統建立程序清單快照；使用前檢查無效值，結束後關閉一次。
     let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
     if snapshot == INVALID_HANDLE_VALUE {
         return Err(std::io::Error::last_os_error());
@@ -92,25 +110,25 @@ fn process_parent_pairs() -> std::io::Result<Vec<(u32, u32)>> {
     };
     let mut pairs = Vec::new();
 
-    // SAFETY: snapshot is valid and entry points to writable PROCESSENTRY32W storage.
+    // SAFETY: snapshot 有效，entry 指向可寫入且大小已設定的 PROCESSENTRY32W。
     let has_entry = unsafe { Process32FirstW(snapshot, &mut entry) } != 0;
     if has_entry {
         loop {
             pairs.push((entry.th32ProcessID, entry.th32ParentProcessID));
             entry.dwSize = entry_size;
-            // SAFETY: snapshot remains valid until it is closed and entry is writable storage.
+            // SAFETY: snapshot 尚未關閉，entry 持續指向可寫入的結構。
             if unsafe { Process32NextW(snapshot, &mut entry) } == 0 {
                 break;
             }
         }
     }
 
-    // SAFETY: snapshot is the handle returned above and is closed exactly once.
+    let error = (!has_entry).then(std::io::Error::last_os_error);
+    // SAFETY: snapshot 是本次取得的快照 handle，並在此處恰好關閉一次。
     unsafe { CloseHandle(snapshot) };
-    if has_entry {
-        Ok(pairs)
-    } else {
-        Err(std::io::Error::last_os_error())
+    match error {
+        Some(error) => Err(error),
+        None => Ok(pairs),
     }
 }
 

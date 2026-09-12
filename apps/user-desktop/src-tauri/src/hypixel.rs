@@ -1,3 +1,18 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 baibai and Botting contributors
+ *
+ * Botting is free software: you can redistribute it and/or modify it under
+ * the GNU Affero General Public License version 3, as published by the
+ * Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ * PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+ * Copyleft: covered modifications must retain these license obligations.
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+
+//! 解析共用的 Hypixel 聊天訊號，讓 Bot 事件與玩家記錄使用相同的判斷規則。
+
 use crate::bot_runtime::GameKind;
 
 /// 玩家可見聊天文字中的共用 Hypixel 訊號，不包含來源格式或敏感資料處理。
@@ -16,12 +31,16 @@ pub(crate) enum VisibleChatSignal {
     CommandRejected(String),
 }
 
+/// 一次正規化聊天文字，辨識共用遊戲與佇列訊號。
+/// @param message Minecraft 可見聊天內容，不包含日誌前綴。
+/// @return 第一個符合的訊號；無關或空白訊息為 None。
 pub(crate) fn parse_visible_chat(message: &str) -> Option<VisibleChatSignal> {
     let plain = collapse_whitespace(message);
     if plain.is_empty() {
         return None;
     }
-    if normalize_message(&plain) == "you were spawned in limbo" {
+    let normalized = normalize_message(&plain);
+    if normalized == "you were spawned in limbo" {
         return Some(VisibleChatSignal::LimboSpawned);
     }
     if let Some(server) = parse_transfer(&plain) {
@@ -34,18 +53,21 @@ pub(crate) fn parse_visible_chat(message: &str) -> Option<VisibleChatSignal> {
             total,
         });
     }
-    if let Some(kind) = game_started(&plain) {
+    if let Some(kind) = game_started(&normalized) {
         return Some(VisibleChatSignal::GameStarted(kind));
     }
-    if game_ended(&plain) {
+    if game_ended(&normalized) {
         return Some(VisibleChatSignal::BedwarsOrSkywarsEnded);
     }
-    if normalize_message(&plain).contains("reward summary") {
+    if normalized.contains("reward summary") {
         return Some(VisibleChatSignal::DuelEnded);
     }
     command_rejection(&plain).map(VisibleChatSignal::CommandRejected)
 }
 
+/// 識別 mini 後接數字及英數字尾碼的遊戲伺服器。
+/// @param server 待判斷的伺服器識別字串。
+/// @return 符合遊戲伺服器格式時為 true。
 pub(crate) fn is_game_server(server: &str) -> bool {
     server.get(..4).is_some_and(|prefix| {
         prefix.eq_ignore_ascii_case("mini")
@@ -58,6 +80,10 @@ pub(crate) fn is_game_server(server: &str) -> bool {
     })
 }
 
+/// 以不區分 ASCII 大小寫方式比對伺服器 ID。
+/// @param target 玩家目標伺服器。
+/// @param candidate Bot 觀察到的伺服器。
+/// @return 相同時為 true。
 pub(crate) fn server_matches(target: &str, candidate: &str) -> bool {
     target.eq_ignore_ascii_case(candidate)
 }
@@ -96,8 +122,7 @@ fn parse_queue_progress(message: &str) -> Option<(String, u32, u32)> {
     .then_some((username, current, total))
 }
 
-fn game_started(message: &str) -> Option<GameKind> {
-    let normalized = normalize_message(message);
+fn game_started(normalized: &str) -> Option<GameKind> {
     if normalized.starts_with("opponent") {
         Some(GameKind::Duels)
     } else if normalized.starts_with("cages opened fight") {
@@ -109,8 +134,7 @@ fn game_started(message: &str) -> Option<GameKind> {
     }
 }
 
-fn game_ended(message: &str) -> bool {
-    let normalized = normalize_message(message);
+fn game_ended(normalized: &str) -> bool {
     normalized.starts_with("victory")
         || normalized.starts_with("game over")
         || ["1st killer", "2nd killer", "3rd killer"]

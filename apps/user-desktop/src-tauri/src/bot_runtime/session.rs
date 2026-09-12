@@ -1,21 +1,31 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 baibai and Botting contributors
+ *
+ * Botting is free software: you can redistribute it and/or modify it under
+ * the GNU Affero General Public License version 3, as published by the
+ * Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ * PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+ * Copyleft: covered modifications must retain these license obligations.
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+
+//! 將 Azalea 事件送入單一 actor，協調 AFK、配對與 Nick 流程的生命週期。
+
 use super::{
     account::MinecraftAccessTokenAccount,
     afk::AdvancedAfk,
-    detection::{self, PitchTracker},
+    detection,
+    match_controller::MatchController,
     nick_roller::{NickAction, NickBook, NickInput, NickRoller, NickRollerPhase},
-    BotCommand, BotConfig, BotEvent, BotGamePhase, BotPhase, GameKind, MatchAttempt,
-    SessionEmitter,
+    BotCommand, BotConfig, BotEvent, BotPhase, SessionEmitter,
 };
 use azalea::{
     account::Account,
     app::PluginGroup,
     bot::DefaultBotPlugins,
-    core::entity_id::MinecraftEntityId,
-    ecs::{
-        component::Component,
-        query::{With, Without},
-    },
-    entity::{metadata::Player, LocalEntity, LookDirection},
+    ecs::component::Component,
     inventory::{components::WrittenBookContent, ItemStack},
     pathfinder::PathfinderPlugin,
     registry::builtin::ItemKind,
@@ -31,14 +41,12 @@ use std::{
 use tokio::sync::mpsc;
 
 const EVENT_BUFFER: usize = 128;
-const TRANSFER_TIMEOUT: Duration = Duration::from_secs(6);
-const RETRY_TRANSFER_TIMEOUT: Duration = Duration::from_secs(12);
-const PITCH_SCAN_INTERVAL: Duration = Duration::from_millis(100);
 const LOW_VIEW_DISTANCE: u8 = 2;
 const PITCH_VIEW_DISTANCE: u8 = 16;
 const AZALEA_EXIT_GRACE: Duration = Duration::from_millis(200);
 
 #[derive(Clone, Component, Default)]
+/// Azalea 回呼共用的輸入通道與原子停止旗標。
 struct HandlerState {
     inputs: Option<mpsc::Sender<SessionInput>>,
     shutdown_requested: Arc<AtomicBool>,
@@ -59,6 +67,11 @@ struct SessionOutcome {
     reason: String,
 }
 
+/// 組合 Azalea 連線與 actor，待兩者收尾後發布離線事件。
+/// @param config 已驗證的連線設定。
+/// @param commands 外部指令接收端。
+/// @param emitter 此連線的事件發送器。
+/// @return 整個 Bot 工作階段結束後完成。
 pub(super) async fn run(
     config: BotConfig,
     commands: mpsc::Receiver<SessionCommand>,
@@ -131,6 +144,11 @@ pub(super) async fn run(
     });
 }
 
+/// 把 Azalea 事件轉入 actor；通道滿時可略過 Tick。
+/// @param bot 目前連線 client。
+/// @param event Azalea 提供的原始事件。
+/// @param state 共享輸入通道及停止旗標。
+/// @return 事件入列或退出安排完成後返回。
 async fn handle_azalea_event(bot: Client, event: Event, state: HandlerState) {
     if state.shutdown_requested.load(Ordering::Acquire) {
         exit_after_grace(bot, state.exit_requested).await;
@@ -153,6 +171,7 @@ async fn handle_azalea_event(bot: Client, event: Event, state: HandlerState) {
         Event::Login => SessionInput::Login,
         Event::Spawn => SessionInput::Spawn,
         Event::Chat(chat) => SessionInput::Chat(chat.message().to_string()),
+        // tick 可合併；通道已滿時略過本次，避免累積過期的週期工作。
         Event::Tick => {
             let _ = inputs.try_send(SessionInput::Tick);
             return;
@@ -174,7 +193,7 @@ async fn handle_azalea_event(bot: Client, event: Event, state: HandlerState) {
 }
 
 async fn exit_after_grace(bot: Client, exit_requested: Arc<AtomicBool>) {
-    // Let Azalea forward queued disconnect events before AppExit closes its receivers.
+    // 先讓 Azalea 轉送已排入佇列的斷線事件，再以 AppExit 關閉接收端。
     tokio::time::sleep(AZALEA_EXIT_GRACE).await;
     request_client_exit(&bot, &exit_requested);
 }
@@ -185,6 +204,9 @@ fn request_client_exit(bot: &Client, exit_requested: &AtomicBool) {
     }
 }
 
+/// 以原子交換確保每個 client 只發出一次退出要求。
+/// @param exit_requested 此連線共享的退出旗標。
+/// @return 本次取得退出責任時為 true。
 fn claim_client_exit(exit_requested: &AtomicBool) -> bool {
     exit_requested
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
@@ -196,6 +218,7 @@ pub(super) enum SessionCommand {
     Stop { reason: String },
 }
 
+/// 以單一 actor 擁有連線、AFK、配對及 Nick 可變狀態，避免跨回呼交錯修改。
 struct SessionActor {
     bot_id: String,
     emitter: SessionEmitter,
@@ -243,6 +266,8 @@ impl SessionActor {
         }
     }
 
+    /// 輪詢指令、連線事件與逾時計時器，停止時清理所有子流程。
+    /// @return 包含最終停止原因的 SessionOutcome。
     async fn run(mut self) -> SessionOutcome {
         let mut timers = tokio::time::interval(Duration::from_millis(50));
         timers.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -302,6 +327,9 @@ impl SessionActor {
         }
     }
 
+    /// 將業務指令分派至 Nick 或一般連線流程。
+    /// @param command BotRuntime 傳入的指令。
+    /// @return 無回傳值；未就緒時發布錯誤事件。
     fn dispatch(&mut self, command: BotCommand) {
         match command {
             BotCommand::StartNickRoller { config } => {
@@ -347,6 +375,10 @@ impl SessionActor {
         }
     }
 
+    /// 執行聊天、配對及回大廳指令，維持 Nick 互斥限制。
+    /// @param command 一般 Bot 業務指令。
+    /// @param client 已取得的 Azalea client。
+    /// @return 無回傳值；執行結果透過事件回報。
     fn dispatch_standard(&mut self, command: BotCommand, client: &Client) {
         match command {
             BotCommand::SendChat(message) => {
@@ -399,6 +431,9 @@ impl SessionActor {
         }
     }
 
+    /// 以連線事件推進 Bot 生命週期與業務狀態機。
+    /// @param input 已轉換的 Azalea 輸入。
+    /// @return true 表示 actor 應結束，false 表示繼續。
     fn handle_input(&mut self, input: SessionInput) -> bool {
         match input {
             SessionInput::Init(client) => {
@@ -506,6 +541,8 @@ impl SessionActor {
         }
     }
 
+    /// 清除 Nick、配對、AFK 及書本快取，斷線後不再對 client 發送動作。
+    /// @return 無回傳值。
     fn cleanup(&mut self) {
         let client = if self.connection_closed {
             None
@@ -527,6 +564,10 @@ impl SessionActor {
         }
     }
 
+    /// 依序執行 Nick 狀態機輸出的聊天及 UI 事件。
+    /// @param client 可用的連線；斷線時為 None。
+    /// @param actions 此輪狀態轉移產生的有序動作。
+    /// @return 無回傳值；結束時視連線狀態恢復 AFK。
     fn apply_nick_actions(&mut self, client: Option<&Client>, actions: Vec<NickAction>) {
         let mut terminal = false;
         for action in actions {
@@ -619,6 +660,10 @@ impl SessionActor {
         }
     }
 
+    // 背包每 tick 都可讀到同一本書；只在內容改變時交給 Nick 狀態機。
+    /// 只在背包中的書本內容變更時解讀 Nick 結果。
+    /// @param client 目前已建立的 Azalea 連線。
+    /// @return 新書本頁面；沒有書本或內容未變時為 None。
     fn read_nick_book(&mut self, client: &Client) -> Option<NickBook> {
         let item = client
             .get_inventory()
@@ -679,250 +724,6 @@ impl SessionActor {
         self.exit_reason = message.to_owned();
         self.emit_error(code, message);
     }
-}
-
-struct MatchController {
-    active: Option<ActiveMatch>,
-    retry: Option<PendingRetry>,
-    pitch: PitchTracker,
-}
-
-struct ActiveMatch {
-    attempt: MatchAttempt,
-    waiting_for_transfer: bool,
-    transfer_deadline: Instant,
-    game_state: Option<BotGamePhase>,
-    pitch_armed: bool,
-    next_pitch_scan: Instant,
-}
-
-struct PendingRetry {
-    request_id: String,
-    deadline: Instant,
-}
-
-impl MatchController {
-    fn new() -> Self {
-        Self {
-            active: None,
-            retry: None,
-            pitch: PitchTracker::new(),
-        }
-    }
-
-    fn begin(&mut self, client: &Client, attempt: MatchAttempt, now: Instant) {
-        self.cancel();
-        client.chat(attempt.mode.play_command());
-        self.active = Some(ActiveMatch {
-            attempt,
-            waiting_for_transfer: true,
-            transfer_deadline: now + TRANSFER_TIMEOUT,
-            game_state: None,
-            pitch_armed: false,
-            next_pitch_scan: now,
-        });
-    }
-
-    fn cancel(&mut self) {
-        self.active = None;
-        self.retry = None;
-        self.pitch.reset();
-    }
-
-    fn return_to_lobby(&mut self, client: &Client, spawned: bool) {
-        self.cancel();
-        if spawned {
-            client.chat("/l");
-        }
-    }
-
-    fn prepare_retry(&mut self, client: &Client, request_id: String, now: Instant) {
-        self.cancel();
-        self.retry = Some(PendingRetry {
-            request_id,
-            deadline: now + RETRY_TRANSFER_TIMEOUT,
-        });
-        client.chat("/limbo");
-    }
-
-    fn handle_chat(&mut self, message: &str, bot_id: &str, emitter: &SessionEmitter, now: Instant) {
-        // /limbo 不一定觸發 Azalea Spawn；Hypixel 的確認聊天才代表 retry 已可繼續。
-        if detection::limbo_spawn(message) {
-            if let Some(retry) = self.retry.take() {
-                emitter.publish(BotEvent::MatchRetryReady {
-                    bot_id: bot_id.to_owned(),
-                    request_id: retry.request_id,
-                });
-                return;
-            }
-        }
-
-        if self.active.is_some() {
-            if let Some((current, total)) = detection::queue_progress(message) {
-                emitter.publish(BotEvent::QueueProgress {
-                    bot_id: bot_id.to_owned(),
-                    current,
-                    total,
-                });
-            }
-        }
-
-        if self
-            .active
-            .as_ref()
-            .is_some_and(|active| active.waiting_for_transfer)
-        {
-            if let Some(rejection) = detection::command_rejection(message) {
-                let Some(active) = self.active.take() else {
-                    return;
-                };
-                emit_attempt_failure(emitter, bot_id, active.attempt, "command_spam", rejection);
-                return;
-            }
-
-            if let Some(server) = detection::server_transfer(message) {
-                let (attempt, start_pitch_observation) = {
-                    let Some(active) = self.active.as_mut() else {
-                        return;
-                    };
-                    active.waiting_for_transfer = false;
-                    let start_pitch_observation = active.attempt.mode.kind() == GameKind::Duels;
-                    if start_pitch_observation {
-                        active.pitch_armed = true;
-                        active.next_pitch_scan = now;
-                    }
-                    (active.attempt.clone(), start_pitch_observation)
-                };
-                if start_pitch_observation {
-                    emitter.publish(BotEvent::MatchmakingDebug {
-                        bot_id: bot_id.to_owned(),
-                        message: "[duels pitch] observation started".to_owned(),
-                    });
-                }
-                emitter.publish(BotEvent::MatchAttemptResult {
-                    bot_id: bot_id.to_owned(),
-                    session_id: attempt.session_id,
-                    round_id: attempt.round_id,
-                    target_generation: attempt.target_generation,
-                    attempt_id: attempt.attempt_id,
-                    server,
-                });
-            }
-        }
-
-        let Some(active) = self.active.as_mut() else {
-            return;
-        };
-        let Some(state) = detection::game_state(active.attempt.mode.kind(), message) else {
-            return;
-        };
-        if active.game_state == Some(state) {
-            return;
-        }
-        active.game_state = Some(state);
-        emitter.publish(BotEvent::BotGameState {
-            bot_id: bot_id.to_owned(),
-            round_id: active.attempt.round_id.clone(),
-            target_generation: active.attempt.target_generation,
-            state,
-        });
-    }
-
-    fn tick(&mut self, client: &Client, now: Instant, bot_id: &str, emitter: &SessionEmitter) {
-        let Some(active) = self.active.as_mut() else {
-            return;
-        };
-        if !active.pitch_armed || now < active.next_pitch_scan {
-            return;
-        }
-        active.next_pitch_scan = now + PITCH_SCAN_INTERVAL;
-
-        let players =
-            client.nearest_entity_ids_by::<(), (With<Player>, Without<LocalEntity>)>(|()| true);
-        for entity in players {
-            let Ok((entity_id, pitch)) = client
-                .try_query_entity::<(&MinecraftEntityId, &LookDirection), _>(
-                    entity,
-                    |(id, look)| (id.0, look.x_rot()),
-                )
-            else {
-                continue;
-            };
-            let Some(direction) = self.pitch.observe(entity_id, pitch, now) else {
-                continue;
-            };
-
-            active.pitch_armed = false;
-            emitter.publish(BotEvent::MatchmakingDebug {
-                bot_id: bot_id.to_owned(),
-                message: format!(
-                    "[duels pitch] gesture confirmed: direction={}, pitch={pitch:.1}deg",
-                    direction.as_str()
-                ),
-            });
-            emitter.publish(BotEvent::DuelPitchObserved {
-                bot_id: bot_id.to_owned(),
-                round_id: active.attempt.round_id.clone(),
-                target_generation: active.attempt.target_generation,
-                attempt_id: active.attempt.attempt_id.clone(),
-                direction,
-                pitch: pitch.to_radians(),
-            });
-            break;
-        }
-    }
-
-    fn check_timeouts(&mut self, now: Instant, bot_id: &str, emitter: &SessionEmitter) {
-        if self
-            .active
-            .as_ref()
-            .is_some_and(|active| active.waiting_for_transfer && now >= active.transfer_deadline)
-        {
-            let Some(active) = self.active.take() else {
-                return;
-            };
-            emit_attempt_failure(
-                emitter,
-                bot_id,
-                active.attempt,
-                "server_transfer_timeout",
-                "server transfer chat timed out".to_owned(),
-            );
-        }
-
-        if self
-            .retry
-            .as_ref()
-            .is_some_and(|retry| now >= retry.deadline)
-        {
-            let Some(retry) = self.retry.take() else {
-                return;
-            };
-            emitter.publish(BotEvent::MatchRetryPreparationFailed {
-                bot_id: bot_id.to_owned(),
-                request_id: retry.request_id,
-                message: "server transfer timed out".to_owned(),
-            });
-        }
-    }
-}
-
-fn emit_attempt_failure(
-    emitter: &SessionEmitter,
-    bot_id: &str,
-    attempt: MatchAttempt,
-    code: &str,
-    message: String,
-) {
-    emitter.publish(BotEvent::MatchAttemptFailed {
-        bot_id: bot_id.to_owned(),
-        session_id: attempt.session_id,
-        round_id: attempt.round_id,
-        target_generation: attempt.target_generation,
-        attempt_id: attempt.attempt_id,
-        code: code.to_owned(),
-        message,
-    });
 }
 
 #[cfg(test)]

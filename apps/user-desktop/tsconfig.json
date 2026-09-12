@@ -12,8 +12,20 @@
     "resolveJsonModule": true,
     "skipLibCheck": true,
     "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "baseUrl": ".",
     "paths": { "@botting/user-api": ["src/lib/adapters/api.ts"] }
   },
-  "include": ["src/**/*.d.ts", "src/**/*.ts", "src/**/*.svelte", "vite.config.ts"]
+  "include": [
+    "src/**/*.d.ts",
+    "src/**/*.ts",
+    "src/**/*.svelte",
+    "tests/**/*.ts",
+    "../shared-ui/**/*.ts",
+    "../shared-ui/**/*.svelte",
+    "vite.config.ts"
+  ]
 }

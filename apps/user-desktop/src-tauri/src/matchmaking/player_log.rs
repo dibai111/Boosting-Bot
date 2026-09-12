@@ -1,3 +1,18 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 baibai and Botting contributors
+ *
+ * Botting is free software: you can redistribute it and/or modify it under
+ * the GNU Affero General Public License version 3, as published by the
+ * Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ * PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+ * Copyleft: covered modifications must retain these license obligations.
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+
+//! 從記錄檔尾端追蹤新增內容，處理檔案輪替、半行及停止訊號。
+
 use anyhow::{Context, Result};
 use std::{
     collections::hash_map::DefaultHasher,
@@ -20,11 +35,13 @@ const MAX_CHUNK_BYTES: u64 = 256 * 1024;
 const MAX_LINE_BYTES: usize = 64 * 1024;
 
 #[derive(Debug)]
+/// 日誌追蹤器輸出的一行文字或暫時不可讀狀態。
 pub enum PlayerLogMessage {
     Line(String),
     Unavailable(String),
 }
 
+/// 擁有日誌輪詢任務與可中斷滿通道發送的停止通知。
 pub struct PlayerLogTailer {
     stop: Option<oneshot::Sender<()>>,
     task: JoinHandle<()>,
@@ -36,6 +53,11 @@ struct ReadChunk {
 }
 
 impl PlayerLogTailer {
+    /// 從啟動時的檔案尾端開始，避免舊遊戲記錄觸發新的配對。
+    /// 驗證一般檔案並從當前尾端開始追蹤新增內容。
+    /// @param path 已正規化的玩家日誌路徑。
+    /// @param messages 接收完整行及不可用訊息的有界通道。
+    /// @return 可停止的追蹤器，或檔案驗證錯誤。
     pub async fn start(path: PathBuf, messages: mpsc::Sender<PlayerLogMessage>) -> Result<Self> {
         let metadata = tokio::fs::metadata(&path)
             .await
@@ -52,6 +74,8 @@ impl PlayerLogTailer {
         })
     }
 
+    /// 要求停止追蹤並等待背景任務結束。
+    /// @return 背景任務結束後完成。
     pub async fn stop(mut self) {
         if let Some(stop) = self.stop.take() {
             let _ = stop.send(());
@@ -117,6 +141,7 @@ async fn run(
     }
 }
 
+// 發送也監聽停止訊號，避免接收端塞滿時無法關閉追蹤工作。
 async fn send_message(
     messages: &mpsc::Sender<PlayerLogMessage>,
     stop: &mut oneshot::Receiver<()>,
@@ -128,6 +153,12 @@ async fn send_message(
     }
 }
 
+/// 以有限區塊讀取新增位元組，偵測截短及檔頭變更。
+/// @param path 玩家日誌路徑。
+/// @param offset 讀取位置；輪替時重設為零。
+/// @param signature 前次檔頭雜湊。
+/// @param signature_checked_at 上次檔頭檢查時間，用於節流。
+/// @return 新增資料與是否輪替的標記，或 I/O 錯誤。
 async fn read_new_bytes(
     path: &Path,
     offset: &mut u64,
@@ -178,6 +209,12 @@ async fn file_signature(path: &Path) -> Result<u64> {
     Ok(hasher.finish())
 }
 
+/// 保留未完成行並發送完整行，限制單行大小。
+/// @param partial 跨區塊保留的未完成行緩衝區。
+/// @param bytes 本次新增位元組。
+/// @param messages 下游訊息通道。
+/// @param stop 可中斷通道等待的停止通知。
+/// @return 發送完成結果；停止或接收端關閉時為 Err。
 async fn emit_lines(
     partial: &mut Vec<u8>,
     bytes: &[u8],
@@ -210,6 +247,7 @@ async fn emit_lines(
     Ok(())
 }
 
+// 相容 CP950 編碼的 Minecraft 顏色碼，再以 UTF-8 寬鬆解碼其餘內容。
 fn decode_log_line(bytes: &[u8]) -> String {
     let mut normalized = Vec::with_capacity(bytes.len());
     let mut index = 0;

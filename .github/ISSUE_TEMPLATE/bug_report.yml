@@ -1,0 +1,57 @@
+name: 問題回報
+description: 回報可以重現的 Botting 行為問題。
+title: "[Bug] "
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Botting 版本或 commit
+      placeholder: 0.1.0 或 commit SHA
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 執行環境
+      description: Windows 版本；從原始碼執行時附 Node、pnpm 與 Rust 版本。
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: 影響功能
+      options:
+        - 帳號登入與儲存
+        - Bot 連線與啟停
+        - BedWars 配對
+        - Duels 配對
+        - SkyWars 配對
+        - Nick Roller
+        - 視窗、快捷鍵與介面
+        - 建置與開發工具
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 重現步驟
+      description: 列出最短操作流程及必要設定，不需要另寫測試腳本。
+      placeholder: |
+        1. 開啟...
+        2. 選擇...
+        3. 執行...
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: 預期與實際結果
+      description: 說明差異、發生頻率及是否影響所有 Bot。
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相關日誌
+      description: 僅附必要片段，移除 Cookie、權杖、Registry 匯出及其他登入憑據。
+      render: text

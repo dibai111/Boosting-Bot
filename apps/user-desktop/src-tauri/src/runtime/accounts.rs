@@ -1,3 +1,18 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 baibai and Botting contributors
+ *
+ * Botting is free software: you can redistribute it and/or modify it under
+ * the GNU Affero General Public License version 3, as published by the
+ * Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ * PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+ * Copyleft: covered modifications must retain these license obligations.
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+
+//! 驗證帳號輸入並完成登入後儲存；刪除帳號前先停止其 Bot。
+
 use super::UserRuntime;
 use crate::{
     app_state::CommandResult,
@@ -13,6 +28,8 @@ use local_store::{AccountRecord, AuthKind, CreateAccountInput};
 use uuid::Uuid;
 
 impl UserRuntime {
+    /// 取得帳號清單，並從舊版 access token 補出缺少的到期時間。
+    /// @return 帳號快照或儲存錯誤。
     pub(crate) async fn list_accounts(&self) -> CommandResult<Vec<AccountRecord>> {
         let mut accounts = self
             .with_store(|store| store.list_accounts().map_err(|error| error.to_string()))
@@ -28,6 +45,9 @@ impl UserRuntime {
         Ok(accounts)
     }
 
+    /// 依登入方式驗證輸入、交換工作階段並保存帳號。
+    /// @param input 未信任的帳號輸入；Microsoft 流程會發布裝置代碼。
+    /// @return 已驗證且保存的帳號，或登入／儲存錯誤。
     pub(crate) async fn add_account(
         &self,
         mut input: CreateAccountInput,
@@ -127,6 +147,9 @@ impl UserRuntime {
         .await
     }
 
+    /// 先停止並移除各 Bot，再刪除本機帳號。
+    /// @param ids 待移除的本機帳號 ID。
+    /// @return 實際刪除筆數；停止失敗時不繼續刪除儲存資料。
     pub(crate) async fn delete_accounts(&self, ids: Vec<String>) -> CommandResult<usize> {
         for id in &ids {
             validate_length(id, "account id", MAX_BOT_ID_BYTES)
@@ -147,6 +170,10 @@ impl UserRuntime {
         .await
     }
 
+    /// 驗證地址長度與非空條件後更新儲存。
+    /// @param id 本機帳號 ID。
+    /// @param server_address 新的伺服器地址。
+    /// @return 驗證或儲存結果。
     pub(crate) async fn update_server_address(
         &self,
         id: String,

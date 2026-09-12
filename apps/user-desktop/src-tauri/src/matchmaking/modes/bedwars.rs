@@ -1,3 +1,18 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 baibai and Botting contributors
+ *
+ * Botting is free software: you can redistribute it and/or modify it under
+ * the GNU Affero General Public License version 3, as published by the
+ * Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ * PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+ * Copyleft: covered modifications must retain these license obligations.
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+
+//! 以相同伺服器、容量及短時間內增加的玩家數判斷 BedWars 候選。
+
 use crate::hypixel;
 use std::time::{Duration, Instant};
 
@@ -5,12 +20,17 @@ pub(crate) const CONFIRM_WINDOW: Duration = Duration::from_secs(2);
 pub(crate) const CONFIRM_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Copy)]
+/// 包含人數、容量及單調觀察時間的 BedWars 佇列快照。
 pub(crate) struct QueueObservation {
     pub current: u32,
     pub total: u32,
     pub observed_at: Instant,
 }
 
+/// 記錄一次 BedWars 佇列人數。
+/// @param current 目前人數。
+/// @param total 佇列容量。
+/// @return 以目前 Instant 標記的觀察。
 pub(crate) fn observe_queue(current: u32, total: u32) -> QueueObservation {
     QueueObservation {
         current,
@@ -19,6 +39,13 @@ pub(crate) fn observe_queue(current: u32, total: u32) -> QueueObservation {
     }
 }
 
+/// 要求相同伺服器及容量，且 Bot 人數在短時間內晚於玩家增加。
+/// @param player_server 玩家目標伺服器。
+/// @param bot_server Bot 觀察到的伺服器。
+/// @param round_started_at 本輪開始時間。
+/// @param player 玩家端佇列觀察。
+/// @param bot Bot 端佇列觀察。
+/// @return 符合本輪 BedWars 佇列條件時為 true。
 pub(crate) fn is_candidate(
     player_server: Option<&str>,
     bot_server: Option<&str>,

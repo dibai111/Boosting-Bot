@@ -1,91 +1,99 @@
 <div align="center">
   <img src="docs/assets/botting-icon.png" width="96" alt="Botting icon">
   <h1>Botting</h1>
-  <p>A lightweight desktop tool for managing Minecraft bot sessions.</p>
-  <p>
-    <a href="README.md">繁體中文</a>
-    ·
-    <a href="README.en.md">English</a>
-  </p>
+  <p>A Windows desktop tool for Minecraft accounts, bot sessions, and Hypixel matchmaking.</p>
+  <p><a href="README.md">繁體中文</a> · <a href="README.en.md">English</a></p>
+  <p><a href="LICENSE">AGPL-3.0-only</a> · <a href="CONTRIBUTING.md">Contributing</a></p>
 </div>
 
 ## Overview
 
-Botting brings Minecraft account management, bot lifecycle control, server targets, matchmaking, and session logs into one Windows desktop interface. It is designed for managing multiple bots and monitoring their live state from one place.
+Botting brings login, per-account server addresses, bot lifecycle control, player-log matching, and session logs into one desktop application.
 
-## Features
+- Microsoft device-code login, Minecraft access tokens, and Cookie imports.
+- Individual and batch bot control with a dedicated session and thread per bot.
+- BedWars, Duels, and SkyWars matching with mode-specific queue, chat, real-name, or pitch verification.
+- Nick Roller with text and length rules, manual decisions, automatic acceptance, and server confirmation. Nick Roller and matchmaking are mutually exclusive.
+- Global shortcuts, a floating overlay, themes, Traditional Chinese and English, and log export.
+- Windows DPAPI-encrypted account and settings storage in the current user's Registry.
 
-- **Account management**: Add Minecraft accounts with Microsoft login, access tokens, or cookies.
-- **Bot control**: Start or stop bots individually or in batches, with an independent server target for each account.
-- **Matchmaking sessions**: Support BedWars, Duels, and SkyWars workflows.
-- **Nick Roller**: Filter and apply Hypixel nicknames in a standalone mode; Matching is locked while it runs.
-- **Live logs**: Monitor bot state, chat, matchmaking progress, and session logs.
-- **Desktop controls**: Use shortcuts, a floating matchmaking overlay, theme switching, and log export.
+## License
 
-## Technology Overview
+Project-owned source is licensed under **GNU AGPL version 3 only (`AGPL-3.0-only`)**. Read the complete [LICENSE](LICENSE).
 
-| Area | Technology | Purpose |
-| --- | --- | --- |
-| UI | Svelte 5, TypeScript, Vite | Build the desktop interface, components, and frontend state flows |
-| Desktop | Tauri 2 | Combine the web UI and Rust backend into a Windows application |
-| Bot runtime | Rust, Azalea, Tokio, Bevy ECS | Manage Minecraft bot connections, events, and sessions |
-| Matchmaking | Rust modules, serde, serde_json | Parse game logs, plan matchmaking flows, and model state |
-| Network | reqwest, rustls | Handle HTTP communication for login and game services |
-| Local storage | `local-store` crate, Windows APIs | Persist accounts, settings, and local state |
-| UI utilities | `@lucide/svelte`, `skinview3d` | Provide icons, Minecraft character views, and UI interactions |
+When distributing this program or a covered derivative or combined work, preserve the notices and provide complete Corresponding Source under the applicable AGPL terms, including required build and installation materials. If you modify the program and let users interact with that version remotely over a computer network, section 13 requires a prominent opportunity for those users to receive its Corresponding Source.
 
-## Source Structure
+Covered derivatives cannot be relicensed as proprietary software. Merely running or reading the code does not require disclosure of every independent program, private data, or unrelated work. Third-party dependencies and assets retain their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+## Architecture
 
 ```text
-Botting/
-├─ apps/
-│  ├─ shared-ui/          Shared Svelte components, motion, and window helpers
-│  └─ user-desktop/
-│     ├─ src/              Svelte pages, components, adapters, and feature logic
-│     └─ src-tauri/src/    Rust commands, bot runtime, auth, and matchmaking
-├─ crates/
-│  └─ local-store/         Local account, settings, and state storage
-├─ docs/assets/            README and application image assets
-├─ Cargo.toml              Rust workspace configuration
-└─ package.json            pnpm command entry point
+apps/shared-ui/                         Shared components, motion, and scaling
+apps/user-desktop/src/App.svelte        Page and dialog composition
+apps/user-desktop/src/lib/adapters/     Tauri IPC and native window APIs
+apps/user-desktop/src/lib/features/     State coordination and input parsing
+apps/user-desktop/src/lib/components/   Feature-oriented UI components
+apps/user-desktop/src/lib/models/       Wire contracts
+apps/user-desktop/src/lib/log/          Log formatting and transitions
+apps/user-desktop/src-tauri/src/
+  commands/                            Thin IPC entry points
+  runtime/                             Application and account services
+  bot_runtime/                         Azalea sessions, AFK, and Nick state machine
+  matchmaking/                         Plans, log tailing, detection, and retries
+  auth/                                Microsoft and Minecraft authentication
+  platform/                            Windows keyboard hooks
+crates/local-store/                     DPAPI and Registry persistence
+docs/                                  Reviews and coding conventions
+scripts/                               Public-release preflight
+.github/                               Issue/PR templates and manual preflight
 ```
+
+The frontend uses Svelte 5, TypeScript 5, and Vite 8. Tauri 2 hosts the application; Rust, Azalea, Tokio, and Bevy ECS manage bot sessions. See the [main README](README.md#專案架構) for the architecture diagram and [coding conventions](docs/code-conventions.md) for naming and ownership boundaries.
 
 ## Getting Started
 
-Requirements: Windows, Node.js, pnpm, a Rust toolchain, WebView2, and the Windows development tools required by Tauri.
+Use Windows 10/11, Node 22 LTS (22.16 or newer), pnpm 11.9.0, Visual Studio 2022 C++ Build Tools with Windows SDK, and WebView2 Runtime. Rust is pinned to `nightly-2026-08-04`; stable Rust does not support the workspace's Cargo profile options. See [Tauri's Windows prerequisites](https://v2.tauri.app/start/prerequisites/#windows).
 
 ```powershell
-cd D:\Codex\Botting
-pnpm install
+git clone https://github.com/dibai111/Boosting-Bot.git
+cd Boosting-Bot
+npm install --global pnpm@11.9.0
+rustup toolchain install nightly-2026-08-04 --profile minimal --component rustfmt --component clippy
+pnpm install --frozen-lockfile
 pnpm tauri:dev
 ```
 
-Frontend checks:
+The repository is currently private, so cloning requires authorized GitHub access. Adding a license does not change repository visibility.
+
+`pnpm tauri:dev` starts Vite at `http://localhost:1420` and opens the desktop application. `pnpm dev` runs only Vite; account and bot operations require Tauri IPC. Both Vite and Tauri must agree on the development port.
+
+No application environment variables or `.env` file are required. Tauri supplies `TAURI_ENV_PLATFORM` for the frontend target. Do not put credentials in the `VITE_` or `TAURI_` variables exposed to frontend code.
+
+Accounts and preferences are stored as DPAPI-encrypted JSON in `HKEY_CURRENT_USER\Software\BoostingBot`, value `State`. The historical path remains for compatibility. Logs export to Downloads by default.
 
 ```powershell
 pnpm check
 pnpm build
-```
-
-Rust workspace check:
-
-```powershell
-cargo check --workspace
-```
-
-Build the desktop package:
-
-```powershell
+cargo check --workspace --locked
 pnpm tauri:build
 ```
 
-## Typical Workflow
+Bundling is disabled (`bundle.active: false`). Desktop builds produce `target/release/botting-user.exe`, not an MSI or NSIS installer. Distribution requires the appropriate license and source materials.
 
-1. Start Botting and wait for the application to load.
-2. Open **Accounts** and add a Microsoft account or import a token/cookie.
-3. Configure server targets in **Bots** and select the bots to run.
-4. Choose a game mode and matchmaking count in **Matchmaking**.
-5. Or select online bots and configure nickname rules in **Nick Roller**; the two operation modes cannot run together.
-6. Monitor live state and export logs from **Sessions**.
+## Usage
 
-Only use Minecraft accounts and servers that you are authorized to use, and follow the rules of the relevant services.
+1. Add a Microsoft account in Accounts, supply a server such as `mc.hypixel.net`, and complete device-code login.
+2. Select it in Bots and start it. Wait for Online before using game features.
+3. For matchmaking, select up to 32 online bots, a mode, minimum match count, and the player's `latest.log`. Start matching before joining a new game: previous log content is not replayed.
+4. For Nick Roller, stop matchmaking first. Select online Hypixel bots with MVP++ Nick permissions and set Hypixel's language to English. Configure rules, then accept, skip, or automatically apply candidates.
+5. Inspect or export session logs and stop bots when finished.
+
+The default launcher log is usually `%APPDATA%\.minecraft\logs\latest.log`; other launchers use their instance directory. BedWars can verify chat presence, Duels can verify pitch gestures, and SkyWars checks real names. `F8` toggles matching and `F9` toggles its overlay; both are configurable.
+
+Nick priority rules may accept candidates before ordinary restrictions. Exact length cannot be combined with minimum/maximum length. Applied names are checked against the server's confirmation book.
+
+## Contributing
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md), use the Issue templates, and describe the behavior change and checks performed. Reuse existing tests and avoid unnecessary unit tests, mocks, or test scripts for comments, formatting, or small reversible changes.
+
+Known limitations are recorded in [docs/open-source-review.md](docs/open-source-review.md). Run `pnpm release:check` before a public release. The preflight reads repository visibility and rejects private repositories; it does not publish code, change visibility, or create releases.

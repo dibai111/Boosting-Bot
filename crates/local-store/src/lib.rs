@@ -1,3 +1,18 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 baibai and Botting contributors
+ *
+ * Botting is free software: you can redistribute it and/or modify it under
+ * the GNU Affero General Public License version 3, as published by the
+ * Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ * PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+ * Copyleft: covered modifications must retain these license obligations.
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+
+//! 提供 Windows 本機帳號與設定儲存，資料經 DPAPI 加密後寫入目前使用者的 Registry。
+
 mod accounts;
 mod models;
 mod protection;
@@ -8,11 +23,14 @@ mod state;
 use anyhow::Result;
 pub use models::{AccountRecord, AuthKind, CreateAccountInput, UserSettings};
 
+/// 目前 Windows 使用者的 DPAPI／Registry 儲存入口；讀改寫須由呼叫端序列化。
 pub struct Store {
     registry_path: String,
 }
 
 impl Store {
+    /// 開啟既有儲存鍵，不變更已存資料。
+    /// @return 可用的 Store；非 Windows 或 Registry 開啟失敗時回傳錯誤。
     pub fn open() -> Result<Self> {
         let store = Self {
             registry_path: registry::DEFAULT_PATH.to_owned(),

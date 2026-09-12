@@ -1,4 +1,18 @@
+<!--
+SPDX-License-Identifier: AGPL-3.0-only
+Copyright (C) 2026 baibai and Botting contributors
+
+Botting is free software: you can redistribute it and/or modify it under
+the GNU Affero General Public License version 3, as published by the
+Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+Copyleft: covered modifications must retain these license obligations.
+https://www.gnu.org/licenses/agpl-3.0.html
+-->
+
 <script lang="ts">
+  // 使用 WebGL 繪製主題背景；視窗不可見時停止逐幀更新並在卸載時回收資源。
   import { onMount } from "svelte";
 
   export let className = "";
@@ -334,10 +348,19 @@ void main() {
 
     const vertexShader = compileShader(gl.VERTEX_SHADER, VERT);
     const fragmentShader = compileShader(gl.FRAGMENT_SHADER, FRAG);
-    if (!vertexShader || !fragmentShader) return;
+    // 初始化途中失敗也要釋放已建立的 GPU 資源。
+    if (!vertexShader || !fragmentShader) {
+      if (vertexShader) gl.deleteShader(vertexShader);
+      if (fragmentShader) gl.deleteShader(fragmentShader);
+      return;
+    }
 
     const program = gl.createProgram();
-    if (!program) return;
+    if (!program) {
+      gl.deleteShader(vertexShader);
+      gl.deleteShader(fragmentShader);
+      return;
+    }
     gl.attachShader(program, vertexShader);
     gl.attachShader(program, fragmentShader);
     gl.linkProgram(program);
@@ -351,12 +374,12 @@ void main() {
     gl.useProgram(program);
 
     const buffer = gl.createBuffer();
+    if (!buffer) {
+      gl.deleteProgram(program);
+      return;
+    }
     gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-    gl.bufferData(
-      gl.ARRAY_BUFFER,
-      new Float32Array([-1, -1, 3, -1, -1, 3]),
-      gl.STATIC_DRAW,
-    );
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
     const position = gl.getAttribLocation(program, "a_position");
     gl.enableVertexAttribArray(position);
     gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
@@ -373,9 +396,8 @@ void main() {
     };
 
     const applyThemePalette = () => {
-      const palette = document.documentElement.dataset.theme === "dark"
-        ? darkPalette
-        : lightPalette;
+      const palette =
+        document.documentElement.dataset.theme === "dark" ? darkPalette : lightPalette;
       gl.uniform3fv(locations.colors, new Float32Array(palette.flat()));
     };
 
@@ -394,13 +416,7 @@ void main() {
       uniforms.brightness,
       uniforms.saturation,
     );
-    gl.uniform4f(
-      locations.finish,
-      uniforms.hue,
-      uniforms.vignette,
-      uniforms.blur,
-      uniforms.grain,
-    );
+    gl.uniform4f(locations.finish, uniforms.hue, uniforms.vignette, uniforms.blur, uniforms.grain);
     gl.uniform4f(
       locations.transform,
       uniforms.seed,
@@ -408,13 +424,7 @@ void main() {
       uniforms.drift,
       uniforms.oklab,
     );
-    gl.uniform4f(
-      locations.space,
-      uniforms.offsetX,
-      uniforms.offsetY,
-      0,
-      0,
-    );
+    gl.uniform4f(locations.space, uniforms.offsetX, uniforms.offsetY, 0, 0);
     gl.uniform4f(
       locations.cursor,
       0,
@@ -437,10 +447,8 @@ void main() {
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       const rawWidth = Math.max(1, Math.round(bounds.width * dpr));
       const rawHeight = Math.max(1, Math.round(bounds.height * dpr));
-      const pixelScale = Math.min(
-        1,
-        Math.sqrt(2_000_000 / Math.max(1, rawWidth * rawHeight)),
-      );
+      // 將畫布限制在約兩百萬像素，控制高 DPI 螢幕的填色成本。
+      const pixelScale = Math.min(1, Math.sqrt(2_000_000 / Math.max(1, rawWidth * rawHeight)));
       const width = Math.max(1, Math.round(rawWidth * pixelScale));
       const height = Math.max(1, Math.round(rawHeight * pixelScale));
       if (canvas.width === width && canvas.height === height) return;
@@ -449,6 +457,7 @@ void main() {
       gl.viewport(0, 0, width, height);
     };
 
+    // 畫布離開可見範圍或頁面隱藏時不持續消耗 GPU。
     const canRender = () => !disposed && visible && inView;
 
     const requestRender = () => {
@@ -542,6 +551,6 @@ void main() {
   }
 
   :global(html[data-theme="dark"]) .shader-canvas {
-    opacity: .86 !important;
+    opacity: 0.86 !important;
   }
 </style>

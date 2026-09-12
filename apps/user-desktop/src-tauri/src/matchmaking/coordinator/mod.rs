@@ -1,3 +1,18 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 baibai and Botting contributors
+ *
+ * Botting is free software: you can redistribute it and/or modify it under
+ * the GNU Affero General Public License version 3, as published by the
+ * Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ * PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+ * Copyleft: covered modifications must retain these license obligations.
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+
+//! 管理配對工作階段的啟停、事件分派與快照發布，細部策略分散至子模組。
+
 mod flow;
 mod lifecycle;
 mod queue;
@@ -23,11 +38,13 @@ use tokio::sync::{broadcast, mpsc, watch, Mutex};
 use uuid::Uuid;
 
 #[derive(Clone, Serialize)]
+/// 前端可訂閱的配對診斷訊息，可選擇綁定單一 Bot。
 pub(crate) struct MatchmakingDiagnostic {
     pub bot_id: Option<String>,
     pub message: String,
 }
 
+/// 多 Bot 配對協調器，持有計畫、每輪狀態、日誌追蹤及快照通道。
 pub struct MatchmakingSession {
     pub(crate) bots: Arc<BotRuntime>,
     pub(crate) lifecycle: Mutex<()>,
@@ -38,6 +55,9 @@ pub struct MatchmakingSession {
 }
 
 impl MatchmakingSession {
+    /// 建立空閒配對工作階段與有界通知通道。
+    /// @param bots 發送配對業務指令的 Bot runtime。
+    /// @return 尚未啟動日誌追蹤的協調器。
     pub fn new(bots: Arc<BotRuntime>) -> Self {
         let snapshot = MatchmakingSnapshot::idle();
         let (snapshots, _) = watch::channel(snapshot.clone());
@@ -52,14 +72,22 @@ impl MatchmakingSession {
         }
     }
 
+    /// 訂閱最新配對快照。
+    /// @return watch 接收端；中間快照可能被較新狀態取代。
     pub fn subscribe(&self) -> watch::Receiver<MatchmakingSnapshot> {
         self.snapshots.subscribe()
     }
 
+    /// 訂閱配對診斷事件。
+    /// @return 有界廣播接收端。
     pub(crate) fn subscribe_diagnostics(&self) -> broadcast::Receiver<MatchmakingDiagnostic> {
         self.diagnostics.subscribe()
     }
 
+    /// 發布供日誌顯示的配對診斷。
+    /// @param bot_id 診斷所屬 Bot，整體訊息為 None。
+    /// @param message 不含憑據的診斷文字。
+    /// @return 無回傳值；無訂閱者可丟棄。
     pub(crate) fn diagnose(&self, bot_id: Option<&str>, message: impl Into<String>) {
         let _ = self.diagnostics.send(MatchmakingDiagnostic {
             bot_id: bot_id.map(str::to_owned),
@@ -67,15 +95,22 @@ impl MatchmakingSession {
         });
     }
 
+    /// 在狀態鎖內複製目前配對快照。
+    /// @return 獨立的最新快照。
     pub async fn snapshot(&self) -> MatchmakingSnapshot {
         self.state.lock().await.snapshot.clone()
     }
 
+    /// 只取得配對階段，避免複製所有 Bot 狀態。
+    /// @return 目前配對階段。
     pub(crate) async fn phase(&self) -> MatchmakingPhase {
         // 模式判斷只需要階段，避免複製所有 bot 的快照資料。
         self.state.lock().await.snapshot.phase
     }
 
+    /// 序列化啟停操作，開啟玩家日誌並建立新的配對工作階段。
+    /// @param plan 已驗證的不可變配對計畫。
+    /// @return 等待玩家轉服的快照，或路徑／追蹤啟動錯誤。
     pub async fn start(self: &Arc<Self>, plan: MatchmakingPlan) -> Result<MatchmakingSnapshot> {
         let _lifecycle = self.lifecycle.lock().await;
         let path = tokio::fs::canonicalize(PathBuf::from(plan.log_path()))
@@ -112,6 +147,8 @@ impl MatchmakingSession {
         Ok(snapshot)
     }
 
+    /// 停止日誌追蹤並撤回所選 Bot。
+    /// @return 停止完成後返回。
     pub async fn stop(&self) {
         let _lifecycle = self.lifecycle.lock().await;
         self.stop_inner().await;
@@ -133,6 +170,9 @@ impl MatchmakingSession {
         self.withdraw_bots(&bot_ids).await;
     }
 
+    /// 按事件種類分派嘗試結果、佇列、驗證及連線變更。
+    /// @param event Bot runtime 發布的業務事件。
+    /// @return 無回傳值；有效變更會發布快照。
     pub async fn handle_bot_event(self: &Arc<Self>, event: &BotEvent) {
         match event {
             BotEvent::MatchAttemptResult {
@@ -237,6 +277,9 @@ impl MatchmakingSession {
         }
     }
 
+    /// 以弱參照消費日誌事件，避免背景任務維持協調器存活。
+    /// @param receiver 此日誌追蹤器的訊息接收端。
+    /// @return 無回傳值；建立背景消費任務。
     fn spawn_log_consumer(self: &Arc<Self>, mut receiver: mpsc::Receiver<PlayerLogMessage>) {
         let coordinator = Arc::downgrade(self);
         tokio::spawn(async move {
@@ -256,6 +299,9 @@ impl MatchmakingSession {
         });
     }
 
+    /// 解析玩家聊天日誌並推進配對輪次。
+    /// @param line 單行玩家日誌。
+    /// @return 無回傳值；非配對訊息忽略。
     async fn handle_player_line(self: &Arc<Self>, line: &str) {
         match parse_player_log_line(line) {
             Some(PlayerLogEvent::ServerTransfer(server)) => self.handle_player_server(server).await,
@@ -277,6 +323,9 @@ impl MatchmakingSession {
         }
     }
 
+    /// 替換 watch 通道內的最新快照。
+    /// @param snapshot 完整配對快照。
+    /// @return 無回傳值；尚無接收端仍保留最新值。
     pub(crate) fn publish(&self, snapshot: MatchmakingSnapshot) {
         self.snapshots.send_replace(snapshot);
     }
@@ -444,5 +493,87 @@ mod tests {
             assert!(is_terminal_bot_error(code), "{code}");
         }
         assert!(!is_terminal_bot_error("command_spam"));
+    }
+
+    #[tokio::test]
+    async fn late_retry_cannot_reopen_a_committed_bot() {
+        let session = Arc::new(MatchmakingSession::new(Arc::new(BotRuntime::new(
+            crate::bot_runtime::BotEventBus::new(),
+        ))));
+        {
+            let mut state = session.state.lock().await;
+            state.snapshot.phase = MatchmakingPhase::Committed;
+            state.snapshot.matched_bots = 1;
+            let mut bot = waiting_bot("bot-a");
+            bot.phase = BotMatchPhase::Matched;
+            state.snapshot.bots.push(bot);
+        }
+        session
+            .schedule_retry("bot-a", None, "late timeout", Duration::ZERO, true)
+            .await;
+        let state = session.state.lock().await;
+        assert_eq!(state.snapshot.bots[0].phase, BotMatchPhase::Matched);
+        assert!(state.retry_requests.is_empty());
+    }
+
+    #[tokio::test]
+    async fn failed_round_clears_the_matched_summary() {
+        let session = MatchmakingSession::new(Arc::new(BotRuntime::new(
+            crate::bot_runtime::BotEventBus::new(),
+        )));
+        {
+            let mut state = session.state.lock().await;
+            state.plan = Some(plan(&["bot-a", "bot-b"], 2));
+            state.snapshot.phase = MatchmakingPhase::Matching;
+            state.snapshot.matched_bots = 1;
+            state.snapshot.bots = ["bot-a", "bot-b"].into_iter().map(waiting_bot).collect();
+            state.snapshot.bots[0].phase = BotMatchPhase::Matched;
+        }
+        session.fail_round("Game started too early").await;
+        let snapshot = session.snapshot().await;
+        assert_eq!(snapshot.phase, MatchmakingPhase::Failed);
+        assert_eq!(snapshot.matched_bots, 0);
+        assert_eq!(matched_count(&snapshot), 0);
+    }
+
+    #[tokio::test]
+    async fn late_confirmation_cannot_change_a_committed_round() {
+        let session = MatchmakingSession::new(Arc::new(BotRuntime::new(
+            crate::bot_runtime::BotEventBus::new(),
+        )));
+        {
+            let mut state = session.state.lock().await;
+            state.snapshot.phase = MatchmakingPhase::Matching;
+            state.snapshot.required_matches = 1;
+            state.snapshot.bots = ["bot-a", "bot-b"].into_iter().map(waiting_bot).collect();
+            for bot in &mut state.snapshot.bots {
+                bot.phase = BotMatchPhase::Queued;
+            }
+            state
+                .active_attempts
+                .insert("bot-a".to_owned(), "a".to_owned());
+            state
+                .active_attempts
+                .insert("bot-b".to_owned(), "b".to_owned());
+            state.presence_checks.insert(
+                "bot-b".to_owned(),
+                PresenceCheck {
+                    username: "Bravo".to_owned(),
+                    generation: 1,
+                    attempt_id: "b".to_owned(),
+                    server: "mini1".to_owned(),
+                },
+            );
+        }
+        session.mark_matched("bot-a", Some("mini1")).await;
+        session.mark_matched("bot-b", Some("mini1")).await;
+        let snapshot = session.snapshot().await;
+        assert_eq!(snapshot.phase, MatchmakingPhase::Committed);
+        assert_eq!(snapshot.matched_bots, 1);
+        assert_eq!(snapshot.bots[1].phase, BotMatchPhase::Returning);
+        assert!(session.state.lock().await.presence_checks.is_empty());
+
+        session.mark_unavailable("bot-a", "Disconnected").await;
+        assert_eq!(session.snapshot().await.matched_bots, 0);
     }
 }

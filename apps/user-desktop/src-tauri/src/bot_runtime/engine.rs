@@ -1,8 +1,24 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 baibai and Botting contributors
+ *
+ * Botting is free software: you can redistribute it and/or modify it under
+ * the GNU Affero General Public License version 3, as published by the
+ * Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ * PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+ * Copyleft: covered modifications must retain these license obligations.
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+
+//! 為每個 Bot 建立獨立執行緒與 Tokio runtime，管理指令通道及結束通知。
+
 use super::{session, BotConfig, BotEvent, BotPhase, SessionEmitter};
 use anyhow::{Context, Result};
 use std::thread::JoinHandle;
 use tokio::sync::{mpsc, watch};
 
+/// 持有單一 Bot 執行緒、指令通道及完成通知的生命週期控制柄。
 pub(super) struct SessionHandle {
     pub(super) generation: u64,
     pub(super) commands: mpsc::Sender<session::SessionCommand>,
@@ -11,6 +27,9 @@ pub(super) struct SessionHandle {
 }
 
 impl SessionHandle {
+    /// 送出停止指令並等待執行緒結束；五秒通知逾時不代表 join 有時限。
+    /// @param reason 提供給工作階段與 UI 的停止原因。
+    /// @return 執行緒 join 返回後完成。
     pub(super) async fn stop(mut self, reason: &str) {
         let _ = self
             .commands
@@ -33,6 +52,11 @@ impl SessionHandle {
     }
 }
 
+/// 為 Bot 建立獨立執行緒與單執行緒 Tokio runtime。
+/// @param config 已驗證的 Bot 連線設定。
+/// @param generation 這次連線的世代編號。
+/// @param emitter 只轉送本世代事件的發送器。
+/// @return 可停止的工作階段 handle，或執行緒建立錯誤。
 pub(super) fn spawn(
     config: BotConfig,
     generation: u64,

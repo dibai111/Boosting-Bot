@@ -1,3 +1,18 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 baibai and Botting contributors
+ *
+ * Botting is free software: you can redistribute it and/or modify it under
+ * the GNU Affero General Public License version 3, as published by the
+ * Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ * PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+ * Copyleft: covered modifications must retain these license obligations.
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+
+//! 同步調整主視窗與 WebView 的邊界，避免展開動畫期間畫布尺寸落後。
+
 use crate::app_state::CommandResult;
 const MAIN_WINDOW_LABEL: &str = "main";
 
@@ -10,6 +25,13 @@ struct WindowBounds {
 }
 
 #[tauri::command]
+/// 驗證主視窗及正尺寸後同步調整原生視窗與 WebView。
+/// @param window 提出要求的主視窗。
+/// @param x 實體像素左座標。
+/// @param y 實體像素上座標。
+/// @param width 實體像素寬度。
+/// @param height 實體像素高度。
+/// @return 視窗與 WebView 更新結果。
 pub(crate) async fn set_main_window_layout(
     window: tauri::WebviewWindow,
     x: i32,
@@ -70,7 +92,7 @@ fn set_windows_webview_layout(
 
     let hwnd = hwnd as windows_sys::Win32::Foundation::HWND;
     let mut current_bounds = Default::default();
-    // SAFETY: `hwnd` comes from Tauri's live main window and `current_bounds` is writable.
+    // SAFETY: hwnd 來自仍存活的 Tauri 主視窗，current_bounds 指向可寫入的結構。
     let has_current_bounds = unsafe { GetWindowRect(hwnd, &mut current_bounds) } != 0;
     let bounds_changed = !has_current_bounds
         || current_bounds.left != target.x
@@ -81,8 +103,7 @@ fn set_windows_webview_layout(
     if bounds_changed {
         let controller = webview.controller();
         let mut webview_bounds = Default::default();
-        // SAFETY: WebView2 owns the controller, the bounds are initialized before use, and the
-        // native window coordinates were validated by the command boundary.
+        // SAFETY: controller 由 WebView2 持有，邊界先初始化再使用，視窗尺寸已在指令入口驗證。
         let succeeded = unsafe {
             controller
                 .Bounds(&mut webview_bounds)
@@ -108,7 +129,7 @@ fn set_windows_webview_layout(
         if succeeded == 0 {
             return Err(io::Error::last_os_error().to_string());
         }
-        // SAFETY: the controller belongs to the same live WebView whose bounds were updated.
+        // SAFETY: controller 屬於剛完成邊界更新且仍存活的同一個 WebView。
         unsafe {
             controller
                 .NotifyParentWindowPositionChanged()
@@ -116,7 +137,7 @@ fn set_windows_webview_layout(
         }
     }
 
-    // SAFETY: RedrawWindow only invalidates the live main window and its children.
+    // SAFETY: RedrawWindow 只要求仍存活的主視窗與子視窗重新繪製。
     unsafe {
         RedrawWindow(
             hwnd,

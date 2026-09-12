@@ -1,10 +1,27 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 baibai and Botting contributors
+ *
+ * Botting is free software: you can redistribute it and/or modify it under
+ * the GNU Affero General Public License version 3, as published by the
+ * Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ * PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+ * Copyleft: covered modifications must retain these license obligations.
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+
+//! 管理每個 Bot 的獨立工作階段；generation 用來隔離重新啟動前的舊事件。
+
 mod account;
 mod afk;
 mod detection;
 mod engine;
 mod events;
+mod match_controller;
 mod model;
 mod nick_roller;
+mod nick_rules;
 mod session;
 
 use anyhow::{bail, Context, Result};
@@ -20,6 +37,7 @@ pub(crate) use model::{
 };
 pub(crate) use nick_roller::NickRollerConfig;
 
+/// 持有每個帳號的獨立連線，透過 generation 隔離重新啟動前的事件。
 pub(crate) struct BotRuntime {
     inner: Arc<RuntimeInner>,
 }
@@ -37,6 +55,7 @@ struct RuntimeState {
 }
 
 #[derive(Clone)]
+/// 使用弱參照及連線 generation 過濾舊工作階段事件。
 pub(super) struct SessionEmitter {
     bot_id: String,
     generation: u64,
@@ -44,14 +63,20 @@ pub(super) struct SessionEmitter {
 }
 
 impl SessionEmitter {
+    /// 取得事件發送器所屬帳號。
+    /// @return 本機 Bot ID 的借用字串。
     pub(super) fn bot_id(&self) -> &str {
         &self.bot_id
     }
 
+    /// 只有事件仍屬目前連線 generation 時才廣播。
+    /// @param event 此 Bot 工作階段產生的事件。
+    /// @return 無回傳值；runtime 已釋放或事件過期時丟棄。
     pub(super) fn publish(&self, event: BotEvent) {
         let Some(runtime) = self.runtime.upgrade() else {
             return;
         };
+        // 舊執行緒可能晚於重新啟動結束；只轉送目前 generation 的事件。
         let is_current = runtime
             .state
             .lock()
@@ -65,6 +90,9 @@ impl SessionEmitter {
 }
 
 impl BotRuntime {
+    /// 建立空的 Bot runtime。
+    /// @param events 提供給每個工作階段的事件匯流排。
+    /// @return 可接收啟動要求的 runtime。
     pub(crate) fn new(events: BotEventBus) -> Self {
         Self {
             inner: Arc::new(RuntimeInner {
@@ -74,6 +102,9 @@ impl BotRuntime {
         }
     }
 
+    /// 取代指定 Bot 的舊連線，並拒絕被較新啟動要求取代的結果。
+    /// @param config 已驗證的帳號、權杖及伺服器設定。
+    /// @return 工作階段建立結果；連線狀態另由事件發布。
     pub(crate) async fn start(&self, config: BotConfig) -> Result<()> {
         let bot_id = config.bot_id.clone();
         let (generation, previous) = {
@@ -143,14 +174,24 @@ impl BotRuntime {
         Ok(())
     }
 
+    /// 以使用者停止原因關閉 Bot。
+    /// @param bot_id 本機帳號 ID。
+    /// @return 停止結果；不存在的工作階段視為成功。
     pub(crate) async fn stop(&self, bot_id: &str) -> Result<()> {
         self.stop_with_reason(bot_id, "Stopped from Botting").await
     }
 
+    /// 以帳號移除原因關閉 Bot。
+    /// @param bot_id 即將刪除的本機帳號 ID。
+    /// @return 停止結果。
     pub(crate) async fn remove(&self, bot_id: &str) -> Result<()> {
         self.stop_with_reason(bot_id, "Account removed").await
     }
 
+    /// 複製目前指令通道後釋放同步鎖，再等待通道容量。
+    /// @param bot_id 要接收指令的 Bot ID。
+    /// @param command 配對、聊天或 Nick 業務指令。
+    /// @return 指令入列結果，不代表服務端已執行。
     pub(crate) async fn command(&self, bot_id: &str, command: BotCommand) -> Result<()> {
         let sender = {
             let state = self.lock_state()?;
@@ -166,6 +207,8 @@ impl BotRuntime {
             .context("bot session command channel closed")
     }
 
+    /// 拒絕新連線並依序等待所有工作階段停止。
+    /// @return 已接管的工作階段全部返回後完成。
     pub(crate) async fn shutdown(&self) {
         let sessions = {
             let Ok(mut state) = self.inner.state.lock() else {

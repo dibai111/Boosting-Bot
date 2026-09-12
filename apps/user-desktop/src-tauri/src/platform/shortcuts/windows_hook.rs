@@ -1,3 +1,18 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 baibai and Botting contributors
+ *
+ * Botting is free software: you can redistribute it and/or modify it under
+ * the GNU Affero General Public License version 3, as published by the
+ * Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ * PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+ * Copyleft: covered modifications must retain these license obligations.
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+
+//! 在專用執行緒接收 Windows 低階鍵盤事件，忽略注入按鍵並抑制長按重複觸發。
+
 use super::{ShortcutPair, ShortcutSpec, ALT, CONTROL, SHIFT, SUPER};
 use std::{
     io,
@@ -29,6 +44,10 @@ struct HookState {
 
 static STATE: OnceLock<Mutex<HookState>> = OnceLock::new();
 
+/// 建立低階鍵盤 hook，等待安裝結果後才返回。
+/// @param shortcuts 初始快捷鍵規格。
+/// @param sender 發送操作名稱的有界同步通道。
+/// @return 安裝結果；重複啟動會回傳錯誤。
 pub(super) fn start(
     shortcuts: ShortcutPair,
     sender: mpsc::SyncSender<&'static str>,
@@ -56,6 +75,9 @@ pub(super) fn start(
         .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "keyboard hook stopped"))?
 }
 
+/// 持鎖更新快捷鍵並清除長按追蹤。
+/// @param shortcuts 新的配對快捷鍵組。
+/// @return 更新結果；hook 未啟動或鎖失敗時為 Err。
 pub(super) fn configure(shortcuts: ShortcutPair) -> Result<(), ()> {
     let mut state = STATE.get().ok_or(())?.lock().map_err(|_| ())?;
     state.shortcuts = shortcuts;
@@ -65,8 +87,7 @@ pub(super) fn configure(shortcuts: ShortcutPair) -> Result<(), ()> {
 }
 
 fn run_hook(ready: mpsc::SyncSender<io::Result<()>>) {
-    // SAFETY: The callback has static function linkage, the null module handle requests this
-    // process module, and the hook id/callback pair are valid for a low-level keyboard hook.
+    // SAFETY: 回呼具有固定函式位址，GetModuleHandleW 取得目前程序模組，hook 類型與回呼簽章相符。
     let hook = unsafe {
         SetWindowsHookExW(
             WH_KEYBOARD_LL,
@@ -80,25 +101,22 @@ fn run_hook(ready: mpsc::SyncSender<io::Result<()>>) {
         return;
     }
     if ready.send(Ok(())).is_err() {
-        // SAFETY: hook was returned by SetWindowsHookExW and has not been unhooked yet.
+        // SAFETY: hook 來自成功的 SetWindowsHookExW，且尚未解除。
         unsafe { UnhookWindowsHookEx(hook) };
         return;
     }
 
-    // SAFETY: MSG is a plain Windows message structure for which an all-zero initial value is
-    // valid before GetMessageW fills it.
+    // SAFETY: MSG 允許以全零初始化，之後由 GetMessageW 填入訊息內容。
     let mut message: MSG = unsafe { zeroed() };
-    // SAFETY: message points to writable storage owned by this thread; a null window handle asks
-    // Windows to retrieve messages for the current thread.
+    // SAFETY: message 指向本執行緒的可寫入結構，空視窗 handle 表示取得此執行緒的訊息。
     while unsafe { GetMessageW(&mut message, ptr::null_mut(), 0, 0) } > 0 {}
-    // SAFETY: hook was returned by SetWindowsHookExW and remains installed until this point.
+    // SAFETY: hook 仍處於安裝狀態，於訊息迴圈結束後解除一次。
     unsafe { UnhookWindowsHookEx(hook) };
 }
 
 unsafe extern "system" fn keyboard_callback(code: i32, wparam: usize, lparam: isize) -> isize {
     if code >= 0 {
-        // SAFETY: Windows provides lParam as a pointer to a KBDLLHOOKSTRUCT for a non-negative
-        // low-level keyboard hook code.
+        // SAFETY: 非負的低階鍵盤 hook 代碼保證 lparam 指向有效的 KBDLLHOOKSTRUCT。
         let event = unsafe { &*(lparam as *const KBDLLHOOKSTRUCT) };
         // 忽略程式注入的鍵盤事件，避免合成按鍵再次觸發全域快捷鍵。
         if event.flags & LLKHF_INJECTED == 0 {
@@ -109,8 +127,7 @@ unsafe extern "system" fn keyboard_callback(code: i32, wparam: usize, lparam: is
             }
         }
     }
-    // SAFETY: The callback forwards the values supplied by Windows unchanged; a null hook handle
-    // is permitted when forwarding a low-level hook event.
+    // SAFETY: 沿用 Windows 提供的原始參數轉送事件，低階 hook 允許傳入空的 hook handle。
     unsafe { CallNextHookEx(ptr::null_mut(), code, wparam, lparam) }
 }
 
@@ -165,6 +182,6 @@ fn current_modifiers(alt_down: bool) -> u8 {
 }
 
 fn is_key_down(virtual_key: u16) -> bool {
-    // SAFETY: virtual_key is a Windows virtual-key code and the API has no pointer arguments.
+    // SAFETY: virtual_key 是 Windows 虛擬按鍵代碼，此 API 不接收記憶體指標。
     (unsafe { GetAsyncKeyState(i32::from(virtual_key)) }) < 0
 }

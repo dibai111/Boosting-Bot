@@ -1,21 +1,29 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 baibai and Botting contributors
+ *
+ * Botting is free software: you can redistribute it and/or modify it under
+ * the GNU Affero General Public License version 3, as published by the
+ * Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ * PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+ * Copyleft: covered modifications must retain these license obligations.
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+
+/** 組合功能模組並持有唯一執行狀態，透過 patchState 將變更一次交給頁面。 */
 import type { UserApi } from "../adapters/api";
-import {
-  createBotFeature,
-  type BotFeatureState,
-} from "./bots";
+import { createBotFeature, type BotFeatureState } from "./bots";
 import { createAppEntryFeature, type AppEntryFeatureState } from "./app-entry";
-import {
-  createMatchmakingFeature,
-  type MatchmakingFeatureState,
-} from "./matchmaking-runtime";
+import { createMatchmakingFeature, type MatchmakingFeatureState } from "./matchmaking-runtime";
 import type {
   Account,
   BotPhase,
   GameKind,
   GameMode,
-    MatchmakingSnapshot,
-    RuntimeMode,
-    SessionLogEntry,
+  MatchmakingSnapshot,
+  RuntimeMode,
+  SessionLogEntry,
 } from "../models/types";
 
 type FeatureState = AppEntryFeatureState & BotFeatureState & MatchmakingFeatureState;
@@ -59,6 +67,11 @@ const idleMatchmaking: MatchmakingSnapshot = {
   bots: [],
 };
 
+/**
+ * 組合 Bot、配對及入場功能，持有單一可更新狀態。
+ * @param options API、初始偏好及畫面通知回呼。
+ * @return 供頁面使用的操作與狀態同步介面。
+ */
 export function createUserAppController(options: UserAppControllerOptions) {
   let state: FeatureState = {
     appEntryPhase: "idle",
@@ -66,7 +79,7 @@ export function createUserAppController(options: UserAppControllerOptions) {
     accounts: [],
     selectedBotIds: new Set<string>(),
     phases: {},
-    activeMode: "idle" as RuntimeMode,
+    activeMode: "idle",
     stoppingBotIds: new Set<string>(),
     matchmaking: idleMatchmaking,
     matchmakingBusy: false,
@@ -131,6 +144,11 @@ export function createUserAppController(options: UserAppControllerOptions) {
     patchState({ selectedBotIds: new Set(selectedBotIds) });
   }
 
+  /**
+   * 將頁面配對輸入一次寫入 controller。
+   * @param input 目前選擇、模式及驗證設定。
+   * @return 無回傳值；複製 Set 避免共用可變集合。
+   */
   function applyMatchmakingInput(input: MatchmakingInput): void {
     patchState({
       selectedBotIds: new Set(input.selectedBotIds),
@@ -168,11 +186,21 @@ export function createUserAppController(options: UserAppControllerOptions) {
     patchState({ logPathDialogOpen: false });
   }
 
+  /**
+   * 先同步最新頁面輸入，再啟動配對。
+   * @param input 本次配對輸入。
+   * @return 啟動流程的 Promise。
+   */
   async function startMatchmaking(input: MatchmakingInput): Promise<void> {
     applyMatchmakingInput(input);
     await matchmaking.start();
   }
 
+  /**
+   * 先同步最新頁面輸入，再切換配對啟停。
+   * @param input 本次配對輸入。
+   * @return 操作流程的 Promise。
+   */
   async function toggleMatchmaking(input: MatchmakingInput): Promise<void> {
     applyMatchmakingInput(input);
     await matchmaking.toggle();
@@ -181,26 +209,6 @@ export function createUserAppController(options: UserAppControllerOptions) {
   function continueWithLogPath(matchLogPath: string): void {
     patchState({ matchLogPath });
     matchmaking.continueWithLogPath();
-  }
-
-  function selectMatchGame(game: GameKind): void {
-    matchmaking.selectMatchGame(game);
-  }
-
-  function selectMatchMode(mode: string): void {
-    matchmaking.selectMatchMode(mode);
-  }
-
-  function toggleFavorite(mode: string): void {
-    matchmaking.toggleFavorite(mode);
-  }
-
-  function togglePresenceVerification(): void {
-    matchmaking.togglePresenceVerification();
-  }
-
-  function toggleDuelPitchVerification(): void {
-    matchmaking.toggleDuelPitchVerification();
   }
 
   options.onChange(state);
@@ -216,8 +224,8 @@ export function createUserAppController(options: UserAppControllerOptions) {
     finishAppEntry: appEntry.finishAppEntry,
     hideMatchmakingOverlay: matchmaking.hideOverlay,
     refreshMemory: appEntry.refreshMemory,
-    selectMatchGame,
-    selectMatchMode,
+    selectMatchGame: matchmaking.selectMatchGame,
+    selectMatchMode: matchmaking.selectMatchMode,
     saveServerFor: bots.saveServerFor,
     setActiveMode,
     setAccounts,
@@ -234,10 +242,10 @@ export function createUserAppController(options: UserAppControllerOptions) {
     stopMatchmaking: matchmaking.stop,
     stopSelected: bots.stopSelected,
     stopSession: bots.stopSession,
-    toggleDuelPitchVerification,
-    toggleFavorite,
+    toggleDuelPitchVerification: matchmaking.toggleDuelPitchVerification,
+    toggleFavorite: matchmaking.toggleFavorite,
     toggleMatchmaking,
     toggleMatchmakingOverlay: matchmaking.toggleOverlay,
-    togglePresenceVerification,
+    togglePresenceVerification: matchmaking.togglePresenceVerification,
   };
 }

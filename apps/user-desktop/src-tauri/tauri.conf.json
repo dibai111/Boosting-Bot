@@ -10,10 +10,37 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [{ "title": "Botting", "width": 514, "height": 350, "minWidth": 514, "minHeight": 350, "maxWidth": 1180, "maxHeight": 760, "center": true, "visible": true, "decorations": false, "transparent": true, "shadow": false, "resizable": false, "maximizable": false, "minimizable": true, "devtools": false }]
+    "windows": [
+      {
+        "title": "Botting",
+        "width": 514,
+        "height": 350,
+        "minWidth": 514,
+        "minHeight": 350,
+        "maxWidth": 1180,
+        "maxHeight": 760,
+        "center": true,
+        "visible": true,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": true,
+        "devtools": false
+      }
+    ]
   },
   "bundle": {
+    "license": "AGPL-3.0-only",
     "active": false,
-    "icon": ["icons/32x32.png", "icons/64x64.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.ico", "icons/icon.icns"]
+    "icon": [
+      "icons/32x32.png",
+      "icons/64x64.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico",
+      "icons/icon.icns"
+    ]
   }
 }

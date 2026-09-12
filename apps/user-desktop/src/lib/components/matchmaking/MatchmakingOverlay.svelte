@@ -1,7 +1,26 @@
+<!--
+SPDX-License-Identifier: AGPL-3.0-only
+Copyright (C) 2026 baibai and Botting contributors
+
+Botting is free software: you can redistribute it and/or modify it under
+the GNU Affero General Public License version 3, as published by the
+Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+Copyleft: covered modifications must retain these license obligations.
+https://www.gnu.org/licenses/agpl-3.0.html
+-->
+
 <script lang="ts">
+  // 呈現獨立浮動視窗；設計尺寸需與 Rust overlay 模組的實體像素換算一致。
   import { onMount } from "svelte";
   import { Activity, Check, EyeOff, Radio, X } from "@lucide/svelte";
-  import type { Account, BotMatchPhase, MatchmakingPhase, MatchmakingSnapshot } from "../../models/types";
+  import type {
+    Account,
+    BotMatchPhase,
+    MatchmakingPhase,
+    MatchmakingSnapshot,
+  } from "../../models/types";
 
   const OVERLAY_REFERENCE_SCALE = 1.25;
   const OVERLAY_BASE_HEIGHT = 179;
@@ -49,7 +68,6 @@
     if (phase === "unavailable") return "failed";
     return "working";
   }
-
 </script>
 
 <main
@@ -67,7 +85,9 @@
               <small data-tauri-drag-region>{modeLabel(snapshot.mode)}</small>
             </div>
           </div>
-          <button title={hideLabel} aria-label={hideLabel} on:click={onHide}><EyeOff size={16} /></button>
+          <button title={hideLabel} aria-label={hideLabel} on:click={onHide}
+            ><EyeOff size={16} /></button
+          >
         </header>
 
         <section class="match-overlay-summary">
@@ -75,7 +95,9 @@
             <strong>{snapshot.matched_bots}</strong><span>/{snapshot.bots.length}</span>
           </div>
           <div class="match-overlay-progress-copy">
-            <div><span>{matchedLabel}</span><span>{minimumLabel} {snapshot.required_matches}</span></div>
+            <div>
+              <span>{matchedLabel}</span><span>{minimumLabel} {snapshot.required_matches}</span>
+            </div>
             <div
               class="match-overlay-progress"
               role="progressbar"
@@ -111,7 +133,8 @@
                   {:else}
                     {bot.server || bot.phase}
                   {/if}
-                  · {bot.attempts} {attemptsLabel}
+                  · {bot.attempts}
+                  {attemptsLabel}
                 </small>
               </div>
             </article>
@@ -122,5 +145,4 @@
       </div>
     {/key}
   </div>
-
 </main>

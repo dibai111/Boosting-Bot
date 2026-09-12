@@ -1,3 +1,18 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 baibai and Botting contributors
+ *
+ * Botting is free software: you can redistribute it and/or modify it under
+ * the GNU Affero General Public License version 3, as published by the
+ * Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ * PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+ * Copyleft: covered modifications must retain these license obligations.
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+
+//! 組裝 Tauri、儲存及 Bot runtime，並將後端事件轉送至桌面視窗。
+
 mod app_state;
 mod auth;
 mod bot_runtime;
@@ -20,6 +35,8 @@ use tauri::{Emitter, Manager};
 use tokio::sync::broadcast::error::RecvError;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// 組裝 Tauri 指令、視窗事件及應用主迴圈。
+/// @return 視窗事件迴圈結束後返回；啟動失敗會 panic。
 pub fn run() {
     tauri::Builder::default()
         .setup(setup_app)
@@ -77,6 +94,9 @@ pub fn run() {
         .expect("error while running Botting User App");
 }
 
+/// 建立儲存、Bot、配對、快捷鍵及事件轉送服務。
+/// @param app 目前 Tauri 應用控制柄。
+/// @return 初始化結果；必要服務建立失敗時中止啟動。
 fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(DroppedFileAccess::default());
     app.manage(shortcuts::MatchmakingShortcuts);
@@ -100,6 +120,9 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// 消費後端事件，先更新應用狀態再轉送至前端。
+/// @param app 目前 Tauri 應用控制柄。
+/// @return 無回傳值；建立隨通道關閉而結束的背景任務。
 fn forward_bot_events(app: tauri::AppHandle) {
     let mut events = app.state::<AppState>().runtime().subscribe_bot_events();
     tauri::async_runtime::spawn(async move {

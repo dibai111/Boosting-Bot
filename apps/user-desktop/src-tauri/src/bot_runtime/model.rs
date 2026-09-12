@@ -1,8 +1,24 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 baibai and Botting contributors
+ *
+ * Botting is free software: you can redistribute it and/or modify it under
+ * the GNU Affero General Public License version 3, as published by the
+ * Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ * PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+ * Copyleft: covered modifications must retain these license obligations.
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+
+//! 定義 Bot 指令、事件及遊戲模式；序列化名稱是與前端溝通的固定契約。
+
 use super::nick_roller::{NickRollerConfig, NickRollerPhase};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+/// 支援的 Hypixel 遊戲模式；serde 名稱為前後端固定契約。
 pub(crate) enum GameMode {
     #[serde(rename = "solo")]
     BedwarsSolo,
@@ -63,6 +79,7 @@ pub(crate) enum GameMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// 模式所屬遊戲，用於選取配對與驗證策略。
 pub(crate) enum GameKind {
     Bedwars,
     Duels,
@@ -70,6 +87,8 @@ pub(crate) enum GameKind {
 }
 
 impl GameMode {
+    /// 將具體遊戲模式對應至策略種類。
+    /// @return Bedwars、Duels 或 Skywars。
     pub(crate) const fn kind(self) -> GameKind {
         match self {
             Self::BedwarsSolo
@@ -103,6 +122,8 @@ impl GameMode {
         }
     }
 
+    /// 取得伺服器辨識的固定遊戲佇列指令。
+    /// @return 以 /play 開頭的靜態字串。
     pub(crate) const fn play_command(self) -> &'static str {
         match self {
             Self::BedwarsSolo => "/play bedwars_eight_one",
@@ -139,6 +160,7 @@ impl GameMode {
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+/// 單一 Minecraft 連線的生命週期階段。
 pub(crate) enum BotPhase {
     Offline,
     Starting,
@@ -150,6 +172,7 @@ pub(crate) enum BotPhase {
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+/// 應用層互斥的閒置、配對與 Nick 篩選模式。
 pub(crate) enum RuntimeMode {
     Idle,
     Matching,
@@ -158,6 +181,7 @@ pub(crate) enum RuntimeMode {
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+/// Bot 所見的遊戲開始或結束訊號。
 pub(crate) enum BotGamePhase {
     Started,
     Ended,
@@ -165,12 +189,15 @@ pub(crate) enum BotGamePhase {
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+/// 玩家確認手勢的上下俯仰方向。
 pub(crate) enum DuelPitchDirection {
     Up,
     Down,
 }
 
 impl DuelPitchDirection {
+    /// 取得俯仰方向的診斷名稱。
+    /// @return up 或 down。
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Up => "up",
@@ -179,6 +206,7 @@ impl DuelPitchDirection {
     }
 }
 
+/// 完成登入驗證後的連線設定；access token 不對前端序列化。
 pub(crate) struct BotConfig {
     pub(crate) bot_id: String,
     pub(crate) username: String,
@@ -188,6 +216,7 @@ pub(crate) struct BotConfig {
 }
 
 #[derive(Debug, Clone)]
+/// 一次配對嘗試的來源識別碼及驗證策略。
 pub(crate) struct MatchAttempt {
     pub(crate) session_id: String,
     pub(crate) round_id: String,
@@ -198,6 +227,7 @@ pub(crate) struct MatchAttempt {
 }
 
 #[derive(Debug, Clone)]
+/// 交給 SessionActor 執行的聊天、配對及 Nick 指令。
 pub(crate) enum BotCommand {
     SendChat(String),
     BeginMatchAttempt(MatchAttempt),
@@ -211,6 +241,7 @@ pub(crate) enum BotCommand {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+/// 對前端及配對協調器發布的 tagged union 事件契約。
 pub(crate) enum BotEvent {
     RuntimeMode {
         mode: RuntimeMode,

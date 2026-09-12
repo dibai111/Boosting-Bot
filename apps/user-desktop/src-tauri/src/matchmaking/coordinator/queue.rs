@@ -1,3 +1,18 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 baibai and Botting contributors
+ *
+ * Botting is free software: you can redistribute it and/or modify it under
+ * the GNU Affero General Public License version 3, as published by the
+ * Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ * PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+ * Copyleft: covered modifications must retain these license obligations.
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+
+//! 比對玩家與 Bot 的佇列觀察，依遊戲模式啟動後續確認或逾時重試。
+
 use super::super::detector::real_name_joined_log;
 use super::super::modes::{bedwars, duels, skywars};
 use super::super::{BotMatchPhase, MatchmakingPhase};
@@ -7,6 +22,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 impl MatchmakingSession {
+    /// 保存玩家端佇列觀察，並尋找可確認的 Bot。
+    /// @param username 加入訊息中的真實玩家名稱。
+    /// @param current 目前佇列人數。
+    /// @param total 佇列容量。
+    /// @return 無回傳值；非配對階段忽略。
     pub(crate) async fn handle_player_queue_progress(
         self: &Arc<Self>,
         username: &str,
@@ -58,6 +78,11 @@ impl MatchmakingSession {
         self.confirm_queue_candidates().await;
     }
 
+    /// 依模式保存 Bot 佇列觀察並檢查候選。
+    /// @param bot_id 本機 Bot ID。
+    /// @param current Bot 看到的目前人數。
+    /// @param total Bot 看到的佇列容量。
+    /// @return 無回傳值。
     pub(crate) async fn handle_bot_queue_progress(
         self: &Arc<Self>,
         bot_id: &str,
@@ -86,6 +111,8 @@ impl MatchmakingSession {
         self.confirm_queue_candidates().await;
     }
 
+    /// 依佇列條件收集候選，再啟動聊天／俯仰驗證或直接確認。
+    /// @return 無回傳值；已在驗證的候選不重複發送。
     pub(crate) async fn confirm_queue_candidates(self: &Arc<Self>) {
         let candidates = {
             let state = self.state.lock().await;
@@ -150,6 +177,12 @@ impl MatchmakingSession {
         }
     }
 
+    /// 安排 Duels 佇列確認期限，僅仍有效的嘗試可重試。
+    /// @param bot_id 本機 Bot ID。
+    /// @param generation 目標世代。
+    /// @param attempt_id 排程時的嘗試 ID。
+    /// @param server 待確認的伺服器。
+    /// @return 無回傳值；建立背景期限任務。
     pub(crate) fn spawn_duels_queue_confirmation_timeout(
         self: &Arc<Self>,
         bot_id: String,
@@ -193,6 +226,12 @@ impl MatchmakingSession {
         });
     }
 
+    /// 安排 BedWars 佇列確認期限，已進入聊天驗證時不重複重試。
+    /// @param bot_id 本機 Bot ID。
+    /// @param generation 目標世代。
+    /// @param attempt_id 排程時的嘗試 ID。
+    /// @param server 待確認的伺服器。
+    /// @return 無回傳值；建立背景期限任務。
     pub(crate) fn spawn_bedwars_queue_confirmation_timeout(
         self: &Arc<Self>,
         bot_id: String,
@@ -237,6 +276,11 @@ impl MatchmakingSession {
         });
     }
 
+    /// 等待玩家日誌出現 Bot 名稱，逾時後重試有效嘗試。
+    /// @param bot_id 本機 Bot ID。
+    /// @param generation 目標世代。
+    /// @param attempt_id 排程時的嘗試 ID。
+    /// @return 無回傳值；建立背景期限任務。
     pub(crate) fn spawn_skywars_name_confirmation_timeout(
         self: &Arc<Self>,
         bot_id: String,

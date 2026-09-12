@@ -11,6 +11,14 @@ dist/
 .env
 .env.*
 !.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+cookies*.txt
+tokens*.json
+accounts-export*.json
+session-logs/
 
 # Logs
 *.log

@@ -1,3 +1,18 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 baibai and Botting contributors
+ *
+ * Botting is free software: you can redistribute it and/or modify it under
+ * the GNU Affero General Public License version 3, as published by the
+ * Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ * PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+ * Copyleft: covered modifications must retain these license obligations.
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+
+//! 解析快捷鍵並建立平台 hook，將鍵盤操作轉為 Tauri 事件。
+
 #[cfg(target_os = "windows")]
 mod windows_hook;
 
@@ -32,9 +47,14 @@ const DEFAULT_SHORTCUTS: ShortcutPair = ShortcutPair {
     },
 };
 
+/// 提供全域快捷鍵設定的 Tauri 服務入口。
 pub(crate) struct MatchmakingShortcuts;
 
 impl MatchmakingShortcuts {
+    /// 解析兩個按鍵組合並原子更新 hook 設定。
+    /// @param stop 配對啟停按鍵。
+    /// @param show_overlay 浮動視窗切換按鍵。
+    /// @return 設定結果；無效、衝突或 hook 不可用時回傳錯誤。
     pub(crate) fn configure(&self, stop: &str, show_overlay: &str) -> Result<(), String> {
         let pair = ShortcutPair {
             stop: parse_shortcut(stop)?,
@@ -48,6 +68,9 @@ impl MatchmakingShortcuts {
     }
 }
 
+/// 啟動 Windows 鍵盤 hook 與事件轉送執行緒。
+/// @param app 目前 Tauri 應用控制柄。
+/// @return hook 及執行緒啟動結果。
 pub(crate) fn start(app: AppHandle) -> io::Result<()> {
     let (sender, receiver) = mpsc::sync_channel(16);
     start_hook(DEFAULT_SHORTCUTS, sender)?;
@@ -61,6 +84,9 @@ pub(crate) fn start(app: AppHandle) -> io::Result<()> {
     Ok(())
 }
 
+/// 將修飾鍵與實體按鍵名稱轉成 Windows 虛擬鍵規格。
+/// @param value 以加號分隔的快捷鍵字串。
+/// @return 已驗證規格，或穩定的快捷鍵錯誤代碼。
 fn parse_shortcut(value: &str) -> Result<ShortcutSpec, String> {
     let mut modifiers = 0;
     let mut virtual_key = None;
@@ -75,7 +101,10 @@ fn parse_shortcut(value: &str) -> Result<ShortcutSpec, String> {
             "alt" => modifiers |= ALT,
             "shift" => modifiers |= SHIFT,
             "super" | "win" | "meta" => modifiers |= SUPER,
-            _ if virtual_key.is_none() => virtual_key = parse_virtual_key(part),
+            _ if virtual_key.is_none() => {
+                // 無法辨識的片段必須立即拒絕，不能被後面的有效按鍵蓋過。
+                virtual_key = Some(parse_virtual_key(part).ok_or("shortcut_invalid")?);
+            }
             _ => return Err("shortcut_invalid".to_owned()),
         }
     }
@@ -149,8 +178,11 @@ fn parse_virtual_key(value: &str) -> Option<u32> {
 }
 
 fn single_ascii(value: &str, start: u8, end: u8) -> Option<u32> {
-    let bytes = value.as_bytes();
-    (bytes.len() == 1 && (start..=end).contains(&bytes[0])).then_some(u32::from(bytes[0]))
+    // 先解構長度，避免 then_some 提前求值時讀取空字串的第零個位元組。
+    let [byte] = value.as_bytes() else {
+        return None;
+    };
+    (start..=end).contains(byte).then_some(u32::from(*byte))
 }
 
 #[cfg(target_os = "windows")]
@@ -237,5 +269,18 @@ mod tests {
             parse_shortcut("Digit7").unwrap_err(),
             "shortcut_modifier_required"
         );
+    }
+
+    #[test]
+    fn rejects_incomplete_or_unknown_key_names_without_panicking() {
+        for shortcut in [
+            "Key",
+            "Digit",
+            "control+Key",
+            "invalid+F8",
+            "control+invalid+KeyM",
+        ] {
+            assert_eq!(parse_shortcut(shortcut), Err("shortcut_invalid".to_owned()));
+        }
     }
 }

@@ -1,3 +1,19 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 baibai and Botting contributors
+ *
+ * Botting is free software: you can redistribute it and/or modify it under
+ * the GNU Affero General Public License version 3, as published by the
+ * Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ * PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+ * Copyleft: covered modifications must retain these license obligations.
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+
+//! 以輸入事件推進 Nick 狀態機，輸出待執行動作；規則評估由 nick_rules 負責。
+
+use super::nick_rules::{evaluate_nick, NickRules};
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
@@ -13,7 +29,6 @@ const MAX_IGNORED_BOOK_RESULTS: u8 = 5;
 const MIN_BOOK_TIMEOUT_MS: u64 = 500;
 const MAX_BOOK_TIMEOUT_MS: u64 = 30_000;
 const MAX_NEXT_ROLL_DELAY_MS: u64 = 60_000;
-const PRIORITY_ACCEPT_SEQUENCES: [&str; 5] = ["aaa", "eee", "iii", "ooo", "uuu"];
 const IGNORED_CANDIDATES: [&str; 35] = [
     "a",
     "an",
@@ -52,71 +67,9 @@ const IGNORED_CANDIDATES: [&str; 35] = [
     "vip",
 ];
 
-#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum NickContainsMatchMode {
-    #[default]
-    Any,
-    All,
-}
-
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
-pub(crate) struct NickRules {
-    pub(crate) case_sensitive: bool,
-    pub(crate) exact_length: Option<u8>,
-    pub(crate) min_length: Option<u8>,
-    pub(crate) max_length: Option<u8>,
-    pub(crate) allow_numbers: bool,
-    pub(crate) allow_underscore: bool,
-    pub(crate) allow_list: Vec<String>,
-    pub(crate) starts_with: Vec<String>,
-    pub(crate) ends_with: Vec<String>,
-    pub(crate) contains: Vec<String>,
-    pub(crate) contains_match_mode: NickContainsMatchMode,
-    pub(crate) starts_with_priority: bool,
-    pub(crate) ends_with_priority: bool,
-    pub(crate) contains_priority: bool,
-    pub(crate) legacy_priority: bool,
-}
-
-impl Default for NickRules {
-    fn default() -> Self {
-        Self {
-            case_sensitive: false,
-            exact_length: None,
-            min_length: Some(1),
-            max_length: Some(8),
-            allow_numbers: true,
-            allow_underscore: true,
-            allow_list: Vec::new(),
-            starts_with: Vec::new(),
-            ends_with: Vec::new(),
-            contains: Vec::new(),
-            contains_match_mode: NickContainsMatchMode::Any,
-            starts_with_priority: false,
-            ends_with_priority: false,
-            contains_priority: false,
-            legacy_priority: true,
-        }
-    }
-}
-
-impl NickRules {
-    fn normalized(mut self) -> Self {
-        self.exact_length = normalize_length(self.exact_length);
-        self.min_length = normalize_length(self.min_length);
-        self.max_length = normalize_length(self.max_length);
-        self.allow_list = normalize_list(self.allow_list);
-        self.starts_with = normalize_list(self.starts_with);
-        self.ends_with = normalize_list(self.ends_with);
-        self.contains = normalize_list(self.contains);
-        self
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(default)]
+/// 後端 Nick 篩選設定；不包含只影響 UI 的音效或顯示偏好。
 pub(crate) struct NickRollerConfig {
     pub(crate) book_timeout_ms: u64,
     pub(crate) next_roll_delay_ms: u64,
@@ -136,6 +89,8 @@ impl Default for NickRollerConfig {
 }
 
 impl NickRollerConfig {
+    /// 將等待時間及篩選規則限制在後端支援範圍。
+    /// @return 正規化後的設定。
     pub(crate) fn normalized(mut self) -> Self {
         self.book_timeout_ms = self
             .book_timeout_ms
@@ -148,6 +103,7 @@ impl NickRollerConfig {
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+/// Nick 狀態機階段，序列化值供前端顯示及操作判斷。
 pub(crate) enum NickRollerPhase {
     Idle,
     Preparing,
@@ -160,6 +116,8 @@ pub(crate) enum NickRollerPhase {
 }
 
 impl NickRollerPhase {
+    /// 判斷篩選是否已成功、失敗或被使用者停止。
+    /// @return 終止階段為 true；Idle 不視為終止事件。
     pub(crate) const fn is_terminal(self) -> bool {
         matches!(self, Self::Finished | Self::Failed | Self::Stopped)
     }
@@ -173,11 +131,13 @@ impl NickRollerPhase {
 }
 
 #[derive(Debug, Clone)]
+/// 從 Minecraft 書本物件擷取出的可見頁面文字。
 pub(super) struct NickBook {
     pub(super) pages: Vec<String>,
 }
 
 #[derive(Debug)]
+/// 包含業務事件及單調時間的狀態機輸入，不直接操作連線。
 pub(super) enum NickInput {
     Start {
         config: NickRollerConfig,
@@ -205,6 +165,7 @@ pub(super) enum NickInput {
     Stop,
 }
 
+/// 狀態機輸出的有序副作用描述，由 SessionActor 執行。
 pub(super) enum NickAction {
     SendChat(String),
     State {
@@ -251,6 +212,7 @@ struct BookResult {
     confirmation: Option<Option<String>>,
 }
 
+/// Nick 篩選與候選確認狀態機；候選編號在同一連線內延續。
 pub(super) struct NickRoller {
     config: NickRollerConfig,
     phase: NickRollerPhase,
@@ -267,6 +229,8 @@ pub(super) struct NickRoller {
 }
 
 impl NickRoller {
+    /// 初始化空閒 Nick 狀態機及候選計數器。
+    /// @return 尚未啟動的 NickRoller。
     pub(super) fn new() -> Self {
         Self {
             config: NickRollerConfig::default(),
@@ -289,10 +253,15 @@ impl NickRoller {
         self.phase
     }
 
+    /// 判斷是否仍在準備、篩選、決策或驗證。
+    /// @return 正在執行篩選時為 true。
     pub(super) fn is_active(&self) -> bool {
         self.phase.is_active()
     }
 
+    /// 將一筆輸入推進為新狀態及待執行動作。
+    /// @param input 帶來源事件與時間的 NickInput。
+    /// @return 有序動作清單；過期或無關輸入回傳空清單。
     pub(super) fn handle(&mut self, input: NickInput) -> Vec<NickAction> {
         match input {
             NickInput::Start { config, now } => self.start(config, now),
@@ -317,7 +286,7 @@ impl NickRoller {
         self.pending_book_deadline = None;
         self.pending_confirmation = None;
         self.candidate = None;
-        self.next_candidate_id = 0;
+        // 同一連線重新啟動篩選仍延續編號，避免上一輪遲到的決策命中新候選。
         self.processed_count = 0;
         self.accepted_count = 0;
         self.rejected_count = 0;
@@ -378,7 +347,7 @@ impl NickRoller {
             let Some(confirmation) = result.confirmation else {
                 return Vec::new();
             };
-            return self.finish_confirmation(pending.candidate_id, confirmation, now);
+            return self.finish_confirmation(pending.candidate_id, confirmation);
         }
 
         if self.pending_book_deadline.is_none() || self.phase != NickRollerPhase::Rolling {
@@ -401,7 +370,7 @@ impl NickRoller {
 
         if let Some(pending) = &self.pending_confirmation {
             if now >= pending.deadline {
-                return self.finish_confirmation(pending.candidate_id, None, now);
+                return self.finish_confirmation(pending.candidate_id, None);
             }
         }
 
@@ -439,6 +408,12 @@ impl NickRoller {
         Vec::new()
     }
 
+    // 候選編號必須相符，遲到的介面決定不能套用到下一個候選。
+    /// 只處理目前候選的決策，舊編號不會消耗新候選。
+    /// @param candidate_id 前端收到的候選編號。
+    /// @param take true 表示套用，false 表示跳過。
+    /// @param now 排程下一輪或確認期限的基準時間。
+    /// @return 套用或跳過所需的動作。
     fn decide(&mut self, candidate_id: u64, take: bool, now: Instant) -> Vec<NickAction> {
         let Some(candidate) = self.candidate.take() else {
             return Vec::new();
@@ -469,6 +444,10 @@ impl NickRoller {
         vec![self.state(Some("Nick Roller stopped."))]
     }
 
+    /// 按優先規則與一般條件評估新名稱，累計接受／拒絕數。
+    /// @param nick 書本解析出的 Minecraft 名稱。
+    /// @param now 候選決策期限的基準時間。
+    /// @return 候選事件及可能的自動確認動作。
     fn process_nick(&mut self, nick: String, now: Instant) -> Vec<NickAction> {
         self.processed_count = self.processed_count.saturating_add(1);
         let decision = evaluate_nick(&nick, &self.config.rules);
@@ -532,11 +511,14 @@ impl NickRoller {
         ]
     }
 
+    /// 比對服務端回傳名稱並結束候選驗證。
+    /// @param candidate_id 目前等待驗證的候選編號。
+    /// @param actual_nick 服務端確認名稱；逾時或無法讀取時為 None。
+    /// @return 驗證結果及終止狀態事件。
     fn finish_confirmation(
         &mut self,
         candidate_id: u64,
         actual_nick: Option<String>,
-        _now: Instant,
     ) -> Vec<NickAction> {
         let Some(pending) = self.pending_confirmation.take() else {
             return Vec::new();
@@ -620,6 +602,9 @@ struct Locraw {
     lobbyname: Option<String>,
 }
 
+/// 解析聊天中內嵌的 locraw JSON。
+/// @param message 可能含 JSON 位置回應的聊天文字。
+/// @return 位置資料；無法解析時為 None。
 fn extract_locraw(message: &str) -> Option<Locraw> {
     let start = message.find('{')?;
     let end = message.rfind('}')?;
@@ -635,6 +620,10 @@ fn extract_locraw(message: &str) -> Option<Locraw> {
     })
 }
 
+// 書本標記保留伺服器原文，勿隨中文註解或介面翻譯更動。
+/// 以服務端固定標記辨識隨機名稱及套用確認。
+/// @param book 已去除 Minecraft 物件格式的書本頁面。
+/// @return 解析出的候選名稱及確認結果。
 fn read_book(book: &NickBook) -> BookResult {
     let text = book
         .pages
@@ -691,219 +680,6 @@ fn clean_text(value: &str) -> String {
     result.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-struct NickDecision {
-    accepted: bool,
-    reasons: Vec<String>,
-}
-
-fn evaluate_nick(nick: &str, rules: &NickRules) -> NickDecision {
-    let normalized = if rules.case_sensitive {
-        nick.to_owned()
-    } else {
-        nick.to_ascii_lowercase()
-    };
-
-    if rules.legacy_priority {
-        if let Some(sequence) = find_legacy_priority_sequence(nick) {
-            return accepted(format!("matched priority sequence {sequence}"));
-        }
-    }
-    if !rules.allow_list.is_empty()
-        && matches_literal(&normalized, &rules.allow_list, rules, MatchKind::Equals).is_some()
-    {
-        return accepted("matched allowList".to_owned());
-    }
-    if let Some(reason) = priority_rule_reason(&normalized, rules) {
-        return accepted(reason);
-    }
-
-    let mut reasons = Vec::new();
-    if rules
-        .exact_length
-        .is_some_and(|limit| nick.chars().count() != usize::from(limit))
-    {
-        if let Some(limit) = rules.exact_length {
-            reasons.push(format!(
-                "length {} is not exactly {limit}",
-                nick.chars().count()
-            ));
-        }
-    }
-    if rules
-        .min_length
-        .is_some_and(|limit| nick.chars().count() < usize::from(limit))
-    {
-        if let Some(limit) = rules.min_length {
-            reasons.push(format!(
-                "length {} is shorter than {limit}",
-                nick.chars().count()
-            ));
-        }
-    }
-    if rules
-        .max_length
-        .is_some_and(|limit| nick.chars().count() > usize::from(limit))
-    {
-        if let Some(limit) = rules.max_length {
-            reasons.push(format!(
-                "length {} is longer than {limit}",
-                nick.chars().count()
-            ));
-        }
-    }
-    if !reasons.is_empty() {
-        return rejected(reasons);
-    }
-
-    if !rules.allow_numbers && nick.chars().any(|character| character.is_ascii_digit()) {
-        reasons.push("contains numbers but allow_numbers is false".to_owned());
-    }
-    if !rules.allow_underscore && nick.contains('_') {
-        reasons.push("contains underscore but allow_underscore is false".to_owned());
-    }
-    if nick
-        .chars()
-        .any(|character| !character.is_ascii_alphanumeric() && character != '_')
-    {
-        reasons.push("contains non-Minecraft username characters".to_owned());
-    }
-    if !reasons.is_empty() {
-        return rejected(reasons);
-    }
-
-    let starts_with = configured(&rules.starts_with)
-        && matches_literal(
-            &normalized,
-            &rules.starts_with,
-            rules,
-            MatchKind::StartsWith,
-        )
-        .is_none();
-    if starts_with {
-        reasons.push("does not match Starts With".to_owned());
-    }
-    let ends_with = configured(&rules.ends_with)
-        && matches_literal(&normalized, &rules.ends_with, rules, MatchKind::EndsWith).is_none();
-    if ends_with {
-        reasons.push("does not match Ends With".to_owned());
-    }
-    if configured(&rules.contains) {
-        let contains = rules
-            .contains
-            .iter()
-            .map(|value| value.trim())
-            .filter(|value| !value.is_empty())
-            .collect::<Vec<_>>();
-        let matches = match rules.contains_match_mode {
-            NickContainsMatchMode::Any => contains
-                .iter()
-                .any(|value| contains_value(&normalized, value, rules.case_sensitive)),
-            NickContainsMatchMode::All => contains
-                .iter()
-                .all(|value| contains_value(&normalized, value, rules.case_sensitive)),
-        };
-        if !matches {
-            reasons.push(match rules.contains_match_mode {
-                NickContainsMatchMode::Any => "does not contain any Contains keyword".to_owned(),
-                NickContainsMatchMode::All => "does not contain every Contains keyword".to_owned(),
-            });
-        }
-    }
-
-    if reasons.is_empty() {
-        accepted("all enabled rules passed".to_owned())
-    } else {
-        rejected(reasons)
-    }
-}
-
-fn priority_rule_reason(nick: &str, rules: &NickRules) -> Option<String> {
-    if rules.starts_with_priority {
-        if let Some(value) = matches_literal(nick, &rules.starts_with, rules, MatchKind::StartsWith)
-        {
-            return Some(format!("matched priority Starts With {value}"));
-        }
-    }
-    if rules.ends_with_priority {
-        if let Some(value) = matches_literal(nick, &rules.ends_with, rules, MatchKind::EndsWith) {
-            return Some(format!("matched priority Ends With {value}"));
-        }
-    }
-    if rules.contains_priority {
-        let contains = rules
-            .contains
-            .iter()
-            .map(|value| value.trim())
-            .filter(|value| !value.is_empty())
-            .collect::<Vec<_>>();
-        match rules.contains_match_mode {
-            NickContainsMatchMode::Any => contains
-                .iter()
-                .find(|value| contains_value(nick, value, rules.case_sensitive))
-                .map(|value| format!("matched priority Contains {value}")),
-            NickContainsMatchMode::All if !contains.is_empty() => contains
-                .iter()
-                .all(|value| contains_value(nick, value, rules.case_sensitive))
-                .then(|| format!("matched priority Contains {}", contains.join(", "))),
-            NickContainsMatchMode::All => None,
-        }
-    } else {
-        None
-    }
-}
-
-#[derive(Clone, Copy)]
-enum MatchKind {
-    Equals,
-    StartsWith,
-    EndsWith,
-}
-
-fn matches_literal(
-    nick: &str,
-    values: &[String],
-    rules: &NickRules,
-    kind: MatchKind,
-) -> Option<String> {
-    values.iter().find_map(|value| {
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            return None;
-        }
-        let comparison = if rules.case_sensitive {
-            trimmed.to_owned()
-        } else {
-            trimmed.to_ascii_lowercase()
-        };
-        let matches = match kind {
-            MatchKind::Equals => nick == comparison,
-            MatchKind::StartsWith => nick.starts_with(&comparison),
-            MatchKind::EndsWith => nick.ends_with(&comparison),
-        };
-        matches.then(|| trimmed.to_owned())
-    })
-}
-
-fn contains_value(nick: &str, value: &str, case_sensitive: bool) -> bool {
-    if case_sensitive {
-        nick.contains(value)
-    } else {
-        nick.contains(&value.to_ascii_lowercase())
-    }
-}
-
-fn find_legacy_priority_sequence(nick: &str) -> Option<&'static str> {
-    let mut characters = nick.chars();
-    let first = characters.next()?;
-    if !first.is_ascii_uppercase() || characters.any(|character| character.is_ascii_uppercase()) {
-        return None;
-    }
-    PRIORITY_ACCEPT_SEQUENCES
-        .iter()
-        .copied()
-        .find(|sequence| nick.contains(sequence))
-}
-
 fn is_likely_nick(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 16
@@ -911,37 +687,6 @@ fn is_likely_nick(value: &str) -> bool {
             .chars()
             .all(|character| character.is_ascii_alphanumeric() || character == '_')
         && !IGNORED_CANDIDATES.contains(&value.to_ascii_lowercase().as_str())
-}
-
-fn configured(values: &[String]) -> bool {
-    values.iter().any(|value| !value.trim().is_empty())
-}
-
-fn normalize_length(value: Option<u8>) -> Option<u8> {
-    value.map(|length| length.clamp(1, 16))
-}
-
-fn normalize_list(values: Vec<String>) -> Vec<String> {
-    values
-        .into_iter()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
-        .take(256)
-        .collect()
-}
-
-fn accepted(reason: String) -> NickDecision {
-    NickDecision {
-        accepted: true,
-        reasons: vec![reason],
-    }
-}
-
-fn rejected(reasons: Vec<String>) -> NickDecision {
-    NickDecision {
-        accepted: false,
-        reasons,
-    }
 }
 
 #[cfg(test)]
@@ -953,65 +698,6 @@ mod tests {
             rules,
             ..Default::default()
         }
-    }
-
-    #[test]
-    fn accepts_legacy_priority_sequence_before_other_rules() {
-        let rules = NickRules {
-            max_length: Some(1),
-            ..Default::default()
-        };
-        let result = evaluate_nick("Aaaa", &rules);
-
-        assert!(result.accepted);
-        assert_eq!(result.reasons, ["matched priority sequence aaa"]);
-    }
-
-    #[test]
-    fn applies_all_configured_non_priority_rules() {
-        let rules = NickRules {
-            legacy_priority: false,
-            max_length: Some(8),
-            min_length: Some(3),
-            allow_numbers: false,
-            allow_underscore: false,
-            starts_with: vec!["bot".to_owned()],
-            ends_with: vec!["_x".to_owned()],
-            contains: vec!["safe".to_owned()],
-            contains_match_mode: NickContainsMatchMode::All,
-            ..Default::default()
-        };
-        let result = evaluate_nick("bad", &rules);
-
-        assert!(!result.accepted);
-        assert!(result
-            .reasons
-            .iter()
-            .any(|reason| reason.contains("Starts With")));
-        assert!(result
-            .reasons
-            .iter()
-            .any(|reason| reason.contains("Ends With")));
-        assert!(result
-            .reasons
-            .iter()
-            .any(|reason| reason.contains("Contains")));
-    }
-
-    #[test]
-    fn priority_rules_short_circuit_character_and_length_failures() {
-        let rules = NickRules {
-            legacy_priority: false,
-            starts_with_priority: true,
-            starts_with: vec!["bad".to_owned()],
-            max_length: Some(1),
-            allow_numbers: false,
-            ..Default::default()
-        };
-        let result = evaluate_nick("bad123", &rules);
-
-        assert!(result.accepted);
-        assert_eq!(result.reasons, ["matched priority Starts With bad"]);
     }
 
     #[test]

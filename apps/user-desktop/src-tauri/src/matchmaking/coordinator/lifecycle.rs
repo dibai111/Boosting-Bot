@@ -1,9 +1,26 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 baibai and Botting contributors
+ *
+ * Botting is free software: you can redistribute it and/or modify it under
+ * the GNU Affero General Public License version 3, as published by the
+ * Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ * PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+ * Copyleft: covered modifications must retain these license obligations.
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+
+//! 處理遊戲開始、結束、Bot 離線及回到大廳時的工作階段轉換。
+
 use super::super::{BotMatchPhase, MatchmakingPhase};
-use super::flow::{possible_matches, selected_bot_ids, waiting_bot};
+use super::flow::{matched_count, possible_matches, selected_bot_ids, waiting_bot};
 use super::MatchmakingSession;
 use crate::bot_runtime::{BotCommand, BotGamePhase};
 
 impl MatchmakingSession {
+    /// 玩家回大廳且已有目標時，清除本輪配對。
+    /// @return 無回傳值。
     pub(crate) async fn handle_player_lobby_joined(&self) {
         let has_active_target = self.state.lock().await.snapshot.player_server.is_some();
         if has_active_target {
@@ -11,6 +28,12 @@ impl MatchmakingSession {
         }
     }
 
+    /// 只接受目前輪次中已配對 Bot 的遊戲階段訊號。
+    /// @param bot_id 本機 Bot ID。
+    /// @param round_id 事件輪次 ID。
+    /// @param generation 事件目標世代。
+    /// @param game_state 遊戲開始或結束。
+    /// @return 無回傳值；無效來源忽略。
     pub(crate) async fn handle_bot_game_state(
         &self,
         bot_id: &str,
@@ -36,6 +59,8 @@ impl MatchmakingSession {
         }
     }
 
+    /// 遊戲開始時檢查最低配對數，成功的 Bot 進入 AFK。
+    /// @return 無回傳值；數量不足則使本輪失敗。
     pub(crate) async fn handle_game_started(&self) {
         let (should_fail, snapshot) = {
             let mut state = self.state.lock().await;
@@ -71,6 +96,10 @@ impl MatchmakingSession {
         self.publish(snapshot);
     }
 
+    /// 清除指定 Bot 的嘗試追蹤，更新摘要及可達成數量。
+    /// @param bot_id 本機 Bot ID。
+    /// @param message 不可用的原因。
+    /// @return 無回傳值；不足以達標時結束本輪。
     pub(crate) async fn mark_unavailable(&self, bot_id: &str, message: &str) {
         let (should_fail, snapshot) = {
             let mut state = self.state.lock().await;
@@ -93,6 +122,7 @@ impl MatchmakingSession {
             };
             bot.phase = BotMatchPhase::Unavailable;
             bot.message = Some(message.to_owned());
+            state.snapshot.matched_bots = matched_count(&state.snapshot);
             let should_fail = state.snapshot.phase == MatchmakingPhase::Matching
                 && possible_matches(&state.snapshot) < state.snapshot.required_matches;
             (should_fail, state.snapshot.clone())
@@ -104,6 +134,9 @@ impl MatchmakingSession {
         }
     }
 
+    /// 使目前輪次失敗、清零已配對數量並撤回所有可用 Bot。
+    /// @param message 供快照及日誌顯示的失敗原因。
+    /// @return 無回傳值；未啟動計畫時忽略。
     pub(crate) async fn fail_round(&self, message: impl Into<String>) {
         let bot_ids = {
             let mut state = self.state.lock().await;
@@ -112,6 +145,8 @@ impl MatchmakingSession {
             }
             state.reset_round();
             state.snapshot.phase = MatchmakingPhase::Failed;
+            // 所有已匹配的 Bot 都會撤回，摘要數量也必須同步清零。
+            state.snapshot.matched_bots = 0;
             state.snapshot.message = Some(message.into());
             for bot in &mut state.snapshot.bots {
                 if bot.phase != BotMatchPhase::Unavailable {
@@ -125,6 +160,9 @@ impl MatchmakingSession {
         self.withdraw_bots(&bot_ids).await;
     }
 
+    /// 使舊世代失效，恢復等待玩家轉服的狀態。
+    /// @param message 此次重設的可見原因。
+    /// @return 無回傳值；有進行中的輪次時撤回 Bot。
     pub(crate) async fn reset_for_lobby(&self, message: &str) {
         let bot_ids = {
             let mut state = self.state.lock().await;
@@ -153,6 +191,9 @@ impl MatchmakingSession {
         self.withdraw_bots(&bot_ids).await;
     }
 
+    /// 依序取消指定 Bot 的嘗試並要求回到大廳。
+    /// @param bot_ids 需要撤回的 Bot ID。
+    /// @return 無回傳值；已離線的通道錯誤忽略。
     pub(crate) async fn withdraw_bots(&self, bot_ids: &[String]) {
         for bot_id in bot_ids {
             let _ = self

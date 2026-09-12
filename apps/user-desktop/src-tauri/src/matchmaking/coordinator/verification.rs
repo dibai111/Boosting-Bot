@@ -1,3 +1,18 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 baibai and Botting contributors
+ *
+ * Botting is free software: you can redistribute it and/or modify it under
+ * the GNU Affero General Public License version 3, as published by the
+ * Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ * PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+ * Copyleft: covered modifications must retain these license obligations.
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+
+//! 管理聊天與俯仰驗證；確認訊號和逾時任務必須對應目前嘗試。
+
 use super::super::detector::{chat_verification, duel_pitch};
 use super::super::modes::{bedwars, duels};
 use super::super::MatchmakingPhase;
@@ -8,6 +23,14 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 impl MatchmakingSession {
+    /// 核對目前嘗試並保存俯仰觀察，已有確認閘門時提交候選。
+    /// @param bot_id 本機 Bot ID。
+    /// @param round_id 目前配對輪次 ID。
+    /// @param generation 目標世代編號。
+    /// @param attempt_id 單次嘗試 ID。
+    /// @param direction 上下俯仰方向。
+    /// @param pitch 事件提供的角度，單位為弧度。
+    /// @return 無回傳值；不符合來源或設定時不接受。
     pub(crate) async fn handle_duel_pitch_observed(
         self: &Arc<Self>,
         bot_id: &str,
@@ -80,6 +103,9 @@ impl MatchmakingSession {
         }
     }
 
+    /// 檢查觀察是否屬於目前嘗試與輪次。
+    /// @param bot_id 本機 Bot ID。
+    /// @return 存在有效俯仰觀察時為 true。
     pub(crate) async fn has_duel_pitch_observation(&self, bot_id: &str) -> bool {
         let state = self.state.lock().await;
         let Some(observation) = state.duel_pitch_observations.get(bot_id) else {
@@ -96,6 +122,10 @@ impl MatchmakingSession {
         )
     }
 
+    /// 為有效嘗試建立俯仰驗證期限。
+    /// @param bot_id 本機 Bot ID。
+    /// @param server 已由佇列確認的伺服器。
+    /// @return 無回傳值；已有驗證時不重複建立。
     pub(crate) async fn start_duel_pitch_check(self: &Arc<Self>, bot_id: &str, server: &str) {
         let (generation, attempt_id) = {
             let mut state = self.state.lock().await;
@@ -132,6 +162,11 @@ impl MatchmakingSession {
         self.spawn_duel_pitch_confirmation_timeout(bot_id.to_owned(), generation, attempt_id);
     }
 
+    /// 等待俯仰確認，期限到時只處理相同世代與嘗試。
+    /// @param bot_id 本機 Bot ID。
+    /// @param generation 排程時的目標世代。
+    /// @param attempt_id 排程時的嘗試 ID。
+    /// @return 無回傳值；建立背景期限任務。
     pub(crate) fn spawn_duel_pitch_confirmation_timeout(
         self: &Arc<Self>,
         bot_id: String,
@@ -171,6 +206,10 @@ impl MatchmakingSession {
         });
     }
 
+    /// 依玩家日誌中的真實名稱確認在場，不要求訊息等於送出的短句。
+    /// @param username 日誌中解析出的發言者名稱。
+    /// @param _message 發言內容；目前規則不使用。
+    /// @return 無回傳值；沒有對應驗證時忽略。
     pub(crate) async fn handle_player_chat(self: &Arc<Self>, username: &str, _message: &str) {
         let matched_bot = {
             let state = self.state.lock().await;
@@ -190,6 +229,10 @@ impl MatchmakingSession {
         self.mark_matched(&bot_id, Some(&server)).await;
     }
 
+    /// 記錄預期玩家名稱並向 Bot 發送聊天驗證短句。
+    /// @param bot_id 本機 Bot ID。
+    /// @param server 已由佇列確認的伺服器。
+    /// @return 無回傳值；發送失敗時安排重試。
     pub(crate) async fn start_presence_check(self: &Arc<Self>, bot_id: &str, server: &str) {
         let (command, generation, attempt_id) = {
             let mut state = self.state.lock().await;
@@ -274,6 +317,11 @@ impl MatchmakingSession {
         self.spawn_presence_timeout(bot_id.to_owned(), generation, attempt_id);
     }
 
+    /// 為聊天在場確認建立期限。
+    /// @param bot_id 本機 Bot ID。
+    /// @param generation 排程時的目標世代。
+    /// @param attempt_id 排程時的嘗試 ID。
+    /// @return 無回傳值；過期要求不會重試。
     pub(crate) fn spawn_presence_timeout(
         self: &Arc<Self>,
         bot_id: String,

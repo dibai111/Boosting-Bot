@@ -2,6 +2,9 @@
 name = "botting-user"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
 
 [lib]
 name = "botting_user_lib"

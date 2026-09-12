@@ -1,3 +1,18 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 baibai and Botting contributors
+ *
+ * Botting is free software: you can redistribute it and/or modify it under
+ * the GNU Affero General Public License version 3, as published by the
+ * Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ * PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+ * Copyleft: covered modifications must retain these license obligations.
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+
+//! 把帳號快照與請求合併為不可變配對計畫；使用儲存的名稱而非前端提供的名稱。
+
 use super::StartMatchmakingInput;
 use crate::{
     bot_runtime::{GameKind, GameMode},
@@ -24,6 +39,10 @@ struct PlannedBot {
 }
 
 impl MatchmakingPlan {
+    /// 以儲存帳號快照建立計畫，正規化 ID 並驗證選擇與數量。
+    /// @param input 配對請求。
+    /// @param accounts 本機帳號 ID 與已驗證玩家名稱的序列。
+    /// @return 不可變計畫；帳號缺失或輸入無效時回傳錯誤。
     pub(crate) fn compile(
         mut input: StartMatchmakingInput,
         accounts: impl IntoIterator<Item = (String, String)>,
@@ -59,14 +78,21 @@ impl MatchmakingPlan {
         })
     }
 
+    /// 取得本計畫的遊戲模式。
+    /// @return GameMode。
     pub(crate) const fn mode(&self) -> GameMode {
         self.mode
     }
 
+    /// 依計畫順序列出參與 Bot。
+    /// @return 借用的 Bot ID 迭代器。
     pub(crate) fn bot_ids(&self) -> impl Iterator<Item = &str> {
         self.bots.iter().map(|bot| bot.id.as_str())
     }
 
+    /// 取得建立計畫時保存的玩家名稱。
+    /// @param bot_id 本機 Bot ID。
+    /// @return 玩家名稱；未參與的 Bot 為 None。
     pub(crate) fn username(&self, bot_id: &str) -> Option<&str> {
         self.bots
             .iter()
@@ -74,18 +100,26 @@ impl MatchmakingPlan {
             .map(|bot| bot.username.as_str())
     }
 
+    /// 只對啟用聊天驗證的 BedWars 模式開啟在場確認。
+    /// @return 是否需要聊天驗證。
     pub(crate) fn requires_presence_verification(&self) -> bool {
         self.mode.kind() == GameKind::Bedwars && self.verify_presence
     }
 
+    /// 只對啟用俯仰驗證的 Duels 模式開啟手勢確認。
+    /// @return 是否需要俯仰驗證。
     pub(crate) fn requires_pitch_verification(&self) -> bool {
         self.mode.kind() == GameKind::Duels && self.verify_duel_pitch
     }
 
+    /// 取得本輪成功所需的最低 Bot 數。
+    /// @return 已驗證的最低數量。
     pub(crate) const fn required_matches(&self) -> usize {
         self.required_matches
     }
 
+    /// 取得玩家日誌路徑。
+    /// @return 建立計畫時保存的路徑字串。
     pub(crate) fn log_path(&self) -> &str {
         &self.log_path
     }

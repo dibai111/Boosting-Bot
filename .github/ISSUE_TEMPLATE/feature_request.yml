@@ -1,0 +1,27 @@
+name: 功能建議
+description: 說明使用情境、目前限制與期望結果。
+title: "[Feature] "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 目前遇到的問題
+      description: 描述具體使用情境與現有操作限制。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 期望的行為
+      description: 說明輸入、操作及可觀察結果。
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 已考慮的替代方式
+  - type: textarea
+    id: scope
+    attributes:
+      label: 影響範圍
+      description: 相關遊戲模式、帳號流程、介面或資料相容性。

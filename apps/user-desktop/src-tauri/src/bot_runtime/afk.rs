@@ -1,3 +1,18 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 baibai and Botting contributors
+ *
+ * Botting is free software: you can redistribute it and/or modify it under
+ * the GNU Affero General Public License version 3, as published by the
+ * Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ * PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+ * Copyleft: covered modifications must retain these license obligations.
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+
+//! 以 tick 驅動 AFK 的走動、視角和揮手，停止時一併解除持續中的動作。
+
 use azalea::{
     protocol::packets::game::{s_interact::InteractionHand, ServerboundSwing},
     Client, WalkDirection,
@@ -12,6 +27,7 @@ const LOOK_PITCH_DELTA_DEGREES: std::ops::RangeInclusive<f32> = -10.0..=10.0;
 const WALK_INTERVAL_MS: std::ops::RangeInclusive<u64> = 6_000..=10_000;
 const WALK_DURATION_MS: std::ops::RangeInclusive<u64> = 250..=400;
 
+/// 以 Tick 排程短時間走動、轉向、蹲下及揮手的 AFK 控制器。
 pub(super) struct AdvancedAfk {
     active: bool,
     next_action: Instant,
@@ -22,6 +38,9 @@ pub(super) struct AdvancedAfk {
 }
 
 impl AdvancedAfk {
+    /// 初始化尚未啟用的 AFK 排程。
+    /// @param now 初始單調時間。
+    /// @return 未啟用的控制器。
     pub(super) fn new(now: Instant) -> Self {
         Self {
             active: false,
@@ -33,6 +52,10 @@ impl AdvancedAfk {
         }
     }
 
+    /// 啟用 AFK 並建立下一次動作時間。
+    /// @param bot 可執行動作的 client。
+    /// @param now 排程基準時間。
+    /// @return 由停用變成啟用時為 true。
     pub(super) fn start(&mut self, bot: &Client, now: Instant) -> bool {
         if self.active {
             return false;
@@ -47,6 +70,10 @@ impl AdvancedAfk {
         true
     }
 
+    /// 執行到期動作，並解除已到期限的走動與蹲下。
+    /// @param bot 目前連線。
+    /// @param now 本次 Tick 時間。
+    /// @return 無回傳值；未啟用時直接返回。
     pub(super) fn tick(&mut self, bot: &Client, now: Instant) {
         if !self.active {
             return;
@@ -99,6 +126,9 @@ impl AdvancedAfk {
         self.next_walk = now + random_duration(WALK_INTERVAL_MS);
     }
 
+    /// 清除持續動作及排程，角色仍連線時發送解除動作。
+    /// @param bot 可用 client；已斷線時可傳 None。
+    /// @return 停止前是否啟用。
     pub(super) fn stop(&mut self, bot: Option<&Client>) -> bool {
         let was_active = self.active;
         self.active = false;
