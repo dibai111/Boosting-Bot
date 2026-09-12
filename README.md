@@ -3,7 +3,7 @@
   <h1>Botting</h1>
   <p>集中管理 Minecraft 帳號、Bot 連線與 Hypixel 配對流程的 Windows 桌面工具。</p>
   <p><a href="README.md">繁體中文</a> · <a href="README.en.md">English</a></p>
-  <p><a href="LICENSE">AGPL-3.0-only</a> · <a href="CONTRIBUTING.md">參與貢獻</a> · <a href="docs/open-source-review.md">程式碼審查</a></p>
+  <p><a href="LICENSE">AGPL-3.0-only</a> · <a href="CONTRIBUTING.md">參與貢獻</a></p>
 </div>
 
 ## 專案簡介
@@ -59,9 +59,8 @@ Botting/
 │     │  └─ platform/             Windows 快捷鍵 hook
 │     └─ tests/                   既有前端行為測試
 ├─ crates/local-store/            DPAPI／Registry 儲存及版本模型
-├─ docs/                         命名慣例、審查紀錄與圖片
-├─ scripts/                      發布前檢查
-├─ .github/                      Issue／PR 範本及手動檢查工作流程
+├─ docs/                         命名慣例與圖片
+├─ .github/                      Issue／PR 範本
 ├─ Cargo.toml                    Rust workspace
 └─ package.json                  pnpm 指令入口
 ```
@@ -159,6 +158,4 @@ BedWars 可使用聊天在場確認，Duels 可使用俯仰手勢確認，SkyWar
 
 透過 [Issues](https://github.com/dibai111/Boosting-Bot/issues) 回報可重現問題或功能需求。提交前閱讀 [CONTRIBUTING.md](CONTRIBUTING.md)，說明問題、行為變化與實際驗證結果。
 
-使用既有檢查與測試，不要為註解、排版或可逆的小改動新增測試、Mock 或測試腳本。已知問題與審查範圍見 [開源前審查紀錄](docs/open-source-review.md)。
-
-發布前執行 `pnpm release:check`。檢查會讀取 GitHub 可見性並拒絕私有倉庫；不會替你公開倉庫、推送程式碼或建立 Release。
+使用既有檢查與測試，不要為註解、排版或可逆的小改動新增測試、Mock 或測試腳本。

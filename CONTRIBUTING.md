@@ -52,16 +52,4 @@ Issue 請附版本、Windows 版本、功能模式、重現步驟與預期／實
 
 專案使用標準 [AGPLv3 全文](LICENSE)，沒有額外加入「單純閱讀就必須公開所有作品」等條件。散布受涵蓋作品或修改後提供網路互動時，依條款提供完整對應原始碼。
 
-## 發布前檢查
-
-維護者使用已登入的 GitHub CLI 執行：
-
-```powershell
-pnpm release:check
-```
-
-此命令確認必要文件、來源 Header、npm 防誤發布欄位、已追蹤的本機資料檔名、乾淨工作目錄及 `origin` 的 GitHub 可見性。私有、內部或無法確認可見性的倉庫會被拒絕。GitHub 的 **Public Release Preflight** 工作流程提供相同的手動入口，僅授予 `contents: read`。
-
-兩個 npm package 維持 `private: true`，兩個 Rust crate 設定 `publish = false`。這些設定防止套件管理器誤發布；它們不控制 GitHub 網頁、管理員操作或其他自行新增的發布流程。現有檢查沒有公開倉庫、推送、上傳產物或建立 Release 的動作。
-
-公開散布時，將 LICENSE、必要第三方聲明與該二進位精確對應的原始碼及建置資料一併提供。套件清單與檔名檢查不代表已完成所有歷史版本的憑據或素材權利查核。
+公開散布時，將 LICENSE、必要第三方聲明與該二進位精確對應的原始碼及建置資料一併提供。

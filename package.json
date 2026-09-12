@@ -12,7 +12,6 @@
     "tauri:build": "pnpm --dir apps/user-desktop tauri build",
     "format": "prettier --write \"apps/**/*.{ts,svelte,css,html,json}\" \"*.{json,md}\" \"docs/*.md\" \".github/**/*.{md,yml}\" && cargo fmt --all",
     "format:check": "prettier --check \"apps/**/*.{ts,svelte,css,html,json}\" \"*.{json,md}\" \"docs/*.md\" \".github/**/*.{md,yml}\" && cargo fmt --all -- --check",
-    "release:check": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-public-release.ps1",
     "test": "pnpm --dir apps/user-desktop test",
     "lint:rust": "cargo clippy --workspace --all-targets -- -D warnings"
   },

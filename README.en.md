@@ -43,9 +43,8 @@ apps/user-desktop/src-tauri/src/
   auth/                                Microsoft and Minecraft authentication
   platform/                            Windows keyboard hooks
 crates/local-store/                     DPAPI and Registry persistence
-docs/                                  Reviews and coding conventions
-scripts/                               Public-release preflight
-.github/                               Issue/PR templates and manual preflight
+docs/                                  Coding conventions and images
+.github/                               Issue/PR templates
 ```
 
 The frontend uses Svelte 5, TypeScript 5, and Vite 8. Tauri 2 hosts the application; Rust, Azalea, Tokio, and Bevy ECS manage bot sessions. See the [main README](README.md#專案架構) for the architecture diagram and [coding conventions](docs/code-conventions.md) for naming and ownership boundaries.
@@ -95,5 +94,3 @@ Nick priority rules may accept candidates before ordinary restrictions. Exact le
 ## Contributing
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md), use the Issue templates, and describe the behavior change and checks performed. Reuse existing tests and avoid unnecessary unit tests, mocks, or test scripts for comments, formatting, or small reversible changes.
-
-Known limitations are recorded in [docs/open-source-review.md](docs/open-source-review.md). Run `pnpm release:check` before a public release. The preflight reads repository visibility and rejects private repositories; it does not publish code, change visibility, or create releases.
