@@ -30,4 +30,4 @@
 - [x] cargo clippy --workspace --all-targets -- -D warnings
 - [x] pnpm build
 - [x] git diff --check
-- [ ] 建立 commit 並 push 至 GitHub origin
+- [x] 建立 commit 並 push 至 GitHub origin
