@@ -31,18 +31,8 @@ impl UserRuntime {
     /// 取得帳號清單，並從舊版 access token 補出缺少的到期時間。
     /// @return 帳號快照或儲存錯誤。
     pub(crate) async fn list_accounts(&self) -> CommandResult<Vec<AccountRecord>> {
-        let mut accounts = self
-            .with_store(|store| store.list_accounts().map_err(|error| error.to_string()))
-            .await?;
-        for account in &mut accounts {
-            if matches!(account.auth_kind, AuthKind::AccessToken)
-                && account.session_expires_at.is_none()
-            {
-                account.session_expires_at =
-                    account.credential.as_deref().and_then(access_token::expiry);
-            }
-        }
-        Ok(accounts)
+        self.with_store(|store| store.list_accounts().map_err(|error| error.to_string()))
+            .await
     }
 
     /// 依登入方式驗證輸入、交換工作階段並保存帳號。

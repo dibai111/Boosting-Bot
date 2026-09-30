@@ -13,7 +13,7 @@
 
 //! 管理儲存版本、JSON 編解碼及讀取後修改再寫入的流程；呼叫端需序列化更新。
 
-use crate::{protection, registry, Store};
+use crate::{models::AccountSecrets, protection, registry, Store};
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -38,8 +38,7 @@ pub(crate) struct StoredAccount {
     pub username: String,
     pub profile_id: Option<String>,
     pub auth_kind: crate::AuthKind,
-    pub credential: Option<String>,
-    pub session_token: Option<String>,
+    pub(crate) secrets: AccountSecrets,
     pub session_expires_at: Option<DateTime<Utc>>,
     pub server_address: String,
     pub created_at: DateTime<Utc>,

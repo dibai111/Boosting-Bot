@@ -21,7 +21,7 @@ mod settings;
 mod state;
 
 use anyhow::Result;
-pub use models::{AccountRecord, AuthKind, CreateAccountInput, UserSettings};
+pub use models::{AccountRecord, AccountSession, AuthKind, CreateAccountInput, UserSettings};
 
 /// 目前 Windows 使用者的 DPAPI／Registry 儲存入口；讀改寫須由呼叫端序列化。
 pub struct Store {
@@ -95,16 +95,79 @@ mod tests {
         test.store
             .save_user_settings([("botting-theme".to_owned(), "dark".to_owned())].into())
             .expect("save settings");
-        let account = test
+        let account_id = account.id.clone();
+        let _account = test
             .store
-            .account(&account.id)
+            .account(&account_id)
             .expect("read account")
             .expect("account exists");
-        assert_eq!(account.credential.as_deref(), Some("cookie-data"));
+        let session = test
+            .store
+            .account_session(&account_id)
+            .expect("read session")
+            .expect("session exists");
+        assert_eq!(session.secrets.credential.as_deref(), Some("cookie-data"));
+        assert_eq!(
+            session.secrets.session_token.as_deref(),
+            Some("session-token")
+        );
+        let public_json =
+            serde_json::to_string(&session.account).expect("serialize public account");
+        assert!(!public_json.contains("cookie-data"));
+        assert!(!public_json.contains("session-token"));
         assert_eq!(
             test.store.user_settings().expect("read settings")["botting-theme"],
             "dark"
         );
+    }
+
+    #[test]
+    fn account_updates_reject_missing_accounts_and_invalid_profiles() {
+        let test = TestStore::new();
+        let missing = Uuid::new_v4().to_string();
+        assert!(test
+            .store
+            .update_server_address(&missing, "play.example.net")
+            .is_err());
+        assert!(test
+            .store
+            .update_profile(&missing, "Example", None)
+            .is_err());
+        assert!(test
+            .store
+            .update_auth_session(
+                &missing,
+                "Example",
+                "0123456789abcdef0123456789abcdef",
+                None,
+                "token",
+                None
+            )
+            .is_err());
+
+        let account = test
+            .store
+            .create_account(
+                CreateAccountInput {
+                    username: "Example".to_owned(),
+                    auth_kind: AuthKind::Microsoft,
+                    credential: Some("refresh-token".to_owned()),
+                    server_address: "play.example.net".to_owned(),
+                },
+                Some("01234567-89ab-cdef-0123-456789abcdef".to_owned()),
+                None,
+                None,
+            )
+            .expect("create account");
+        assert!(test
+            .store
+            .update_profile(&account.id, "Example", Some("not-a-uuid"))
+            .is_err());
+        assert!(test
+            .store
+            .update_auth_session(&account.id, "Example", "not-a-uuid", None, "token", None)
+            .is_err());
+        assert!(test.store.update_server_address(&account.id, "  ").is_err());
     }
 
     #[test]

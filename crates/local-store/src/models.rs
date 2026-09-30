@@ -53,22 +53,32 @@ impl TryFrom<&str> for AuthKind {
     }
 }
 
-/// 前端可見的帳號資料；憑據只供後端使用，透過 serde 排除於輸出。
+/// 可安全傳送至前端的帳號資料；不包含登入憑據或工作階段權杖。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccountRecord {
     pub id: String,
     pub username: String,
     pub profile_id: Option<String>,
     pub auth_kind: AuthKind,
-    #[serde(skip_serializing)]
-    pub credential: Option<String>,
-    #[serde(skip_serializing)]
-    pub session_token: Option<String>,
     pub session_expires_at: Option<DateTime<Utc>>,
     pub credential_checked_at: Option<DateTime<Utc>>,
     pub server_address: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+/// 後端登入流程專用的敏感資料，不會透過 IPC 傳送。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccountSecrets {
+    pub credential: Option<String>,
+    pub session_token: Option<String>,
+}
+
+/// 後端登入工作階段；包含秘密的型別不會暴露為 crate 公開 API。
+#[derive(Debug, Clone)]
+pub struct AccountSession {
+    pub account: AccountRecord,
+    pub secrets: AccountSecrets,
 }
 
 #[derive(Debug, Clone, Deserialize)]

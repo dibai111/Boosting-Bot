@@ -13,7 +13,10 @@
 
 //! 處理帳號增刪與登入工作階段更新，並以正規化 UUID 防止重複建立。
 
-use crate::state::StoredAccount;
+use crate::{
+    models::{AccountSecrets, AccountSession},
+    state::StoredAccount,
+};
 use crate::{AccountRecord, CreateAccountInput, Store};
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
@@ -55,6 +58,18 @@ impl Store {
             .map(AccountRecord::from))
     }
 
+    /// 取得後端登入工作階段，僅供 runtime 使用，不能作為 IPC 回應。
+    pub fn account_session(&self, id: &str) -> Result<Option<AccountSession>> {
+        Ok(self
+            .read_state()?
+            .accounts
+            .into_iter()
+            .find(|account| account.id == id)
+            .map(|stored| AccountSession {
+                account: AccountRecord::from(stored.clone()),
+                secrets: stored.secrets,
+            }))
+    }
     /// 拒絕重複 Minecraft UUID 後建立帳號，成功才寫回儲存。
     /// @param input 登入方式、憑據、名稱與伺服器地址。
     /// @param profile_id 已驗證的 Minecraft UUID。
@@ -71,6 +86,7 @@ impl Store {
         self.update_state(|state| {
             if let Some(profile_id) = profile_id.as_deref() {
                 let normalized_id = normalize_profile_id(profile_id);
+                validate_profile_id(&normalized_id)?;
                 if state.accounts.iter().any(|account| {
                     account
                         .profile_id
@@ -85,10 +101,12 @@ impl Store {
             let stored = StoredAccount {
                 id: Uuid::new_v4().to_string(),
                 username: input.username.trim().to_owned(),
-                profile_id,
+                profile_id: profile_id.map(|value| normalize_profile_id(&value)),
                 auth_kind: input.auth_kind,
-                credential: input.credential,
-                session_token,
+                secrets: AccountSecrets {
+                    credential: input.credential,
+                    session_token,
+                },
                 session_expires_at,
                 credential_checked_at: Some(now),
                 server_address: input.server_address.trim().to_owned(),
@@ -120,11 +138,18 @@ impl Store {
     /// @param address 會去除首尾空白的伺服器地址。
     /// @return 儲存結果；帳號不存在時不新增資料。
     pub fn update_server_address(&self, id: &str, address: &str) -> Result<()> {
+        let address = address.trim();
+        if address.is_empty() {
+            bail!("server address is required");
+        }
         self.update_state(|state| {
-            if let Some(account) = state.accounts.iter_mut().find(|account| account.id == id) {
-                account.server_address = address.trim().to_owned();
-                account.updated_at = Utc::now();
-            }
+            let account = state
+                .accounts
+                .iter_mut()
+                .find(|account| account.id == id)
+                .ok_or_else(|| anyhow::anyhow!("account_not_found"))?;
+            account.server_address = address.to_owned();
+            account.updated_at = Utc::now();
             Ok(())
         })
     }
@@ -135,15 +160,26 @@ impl Store {
     /// @param profile_id 新 Minecraft UUID；None 時保留原值。
     /// @return 儲存結果；帳號不存在時不新增資料。
     pub fn update_profile(&self, id: &str, username: &str, profile_id: Option<&str>) -> Result<()> {
+        let username = username.trim();
+        if username.is_empty() {
+            bail!("username is required");
+        }
+        let profile_id = profile_id.map(normalize_profile_id);
         self.update_state(|state| {
-            if let Some(account) = state.accounts.iter_mut().find(|account| account.id == id) {
-                account.username = username.to_owned();
-                if profile_id.is_some() {
-                    account.profile_id = profile_id.map(str::to_owned);
-                }
-                account.updated_at = Utc::now();
-                account.credential_checked_at = Some(account.updated_at);
+            let index = state
+                .accounts
+                .iter()
+                .position(|account| account.id == id)
+                .ok_or_else(|| anyhow::anyhow!("account_not_found"))?;
+            if let Some(profile_id) = profile_id {
+                validate_profile_id(&profile_id)?;
+                ensure_unique_profile_id(state, id, &profile_id)?;
+                state.accounts[index].profile_id = Some(profile_id);
             }
+            let account = &mut state.accounts[index];
+            account.username = username.to_owned();
+            account.updated_at = Utc::now();
+            account.credential_checked_at = Some(account.updated_at);
             Ok(())
         })
     }
@@ -165,18 +201,32 @@ impl Store {
         session_token: &str,
         expires_at: Option<DateTime<Utc>>,
     ) -> Result<()> {
+        let username = username.trim();
+        let profile_id = normalize_profile_id(profile_id);
+        if username.is_empty() {
+            bail!("username is required");
+        }
+        validate_profile_id(&profile_id)?;
+        if session_token.trim().is_empty() {
+            bail!("session token is required");
+        }
         self.update_state(|state| {
-            if let Some(account) = state.accounts.iter_mut().find(|account| account.id == id) {
-                account.username = username.to_owned();
-                account.profile_id = Some(profile_id.to_owned());
-                if let Some(credential) = credential {
-                    account.credential = Some(credential.to_owned());
-                }
-                account.session_token = Some(session_token.to_owned());
-                account.session_expires_at = expires_at;
-                account.updated_at = Utc::now();
-                account.credential_checked_at = Some(account.updated_at);
+            let index = state
+                .accounts
+                .iter()
+                .position(|account| account.id == id)
+                .ok_or_else(|| anyhow::anyhow!("account_not_found"))?;
+            ensure_unique_profile_id(state, id, &profile_id)?;
+            let account = &mut state.accounts[index];
+            account.username = username.to_owned();
+            account.profile_id = Some(profile_id);
+            if let Some(credential) = credential {
+                account.secrets.credential = Some(credential.to_owned());
             }
+            account.secrets.session_token = Some(session_token.to_owned());
+            account.session_expires_at = expires_at;
+            account.updated_at = Utc::now();
+            account.credential_checked_at = Some(account.updated_at);
             Ok(())
         })
     }
@@ -189,8 +239,6 @@ impl From<StoredAccount> for AccountRecord {
             username: account.username,
             profile_id: account.profile_id,
             auth_kind: account.auth_kind,
-            credential: account.credential,
-            session_token: account.session_token,
             session_expires_at: account.session_expires_at,
             credential_checked_at: account.credential_checked_at,
             server_address: account.server_address,
@@ -198,6 +246,28 @@ impl From<StoredAccount> for AccountRecord {
             updated_at: account.updated_at,
         }
     }
+}
+
+fn validate_profile_id(profile_id: &str) -> Result<()> {
+    Uuid::parse_str(profile_id).context("invalid Minecraft profile UUID")?;
+    Ok(())
+}
+
+fn ensure_unique_profile_id(
+    state: &crate::state::PersistedState,
+    id: &str,
+    profile_id: &str,
+) -> Result<()> {
+    if state.accounts.iter().any(|account| {
+        account.id != id
+            && account
+                .profile_id
+                .as_deref()
+                .is_some_and(|existing| normalize_profile_id(existing) == profile_id)
+    }) {
+        bail!(ACCOUNT_ALREADY_EXISTS);
+    }
+    Ok(())
 }
 
 /// 正規化 UUID 的字面差異，供重複帳號比對。

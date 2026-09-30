@@ -21,7 +21,7 @@ use crate::{
     input_limits::{validate_length, MAX_BOT_ID_BYTES},
 };
 use chrono::{Duration, Utc};
-use local_store::{AccountRecord, AuthKind};
+use local_store::{AccountSession, AuthKind};
 use uuid::Uuid;
 
 impl UserRuntime {
@@ -34,7 +34,7 @@ impl UserRuntime {
         let mut account = self
             .with_store(move |store| {
                 store
-                    .account(&account_id)
+                    .account_session(&account_id)
                     .map_err(|error| error.to_string())?
                     .ok_or_else(|| "account not found".to_owned())
             })
@@ -42,6 +42,7 @@ impl UserRuntime {
         self.prepare_session(&mut account).await?;
 
         let profile_id = account
+            .account
             .profile_id
             .as_deref()
             .ok_or_else(|| "Minecraft profile is missing".to_owned())?;
@@ -49,11 +50,11 @@ impl UserRuntime {
             .map_err(|_| "Minecraft profile UUID is invalid".to_owned())?;
         let access_token = active_access_token(&account)?;
         let config = BotConfig {
-            bot_id: account.id,
-            username: account.username,
+            bot_id: account.account.id,
+            username: account.account.username,
             uuid,
             access_token,
-            server_address: account.server_address,
+            server_address: account.account.server_address,
         };
         self.bots
             .start(config)
@@ -72,35 +73,35 @@ impl UserRuntime {
     /// 依登入種類更新工作階段，並同步記憶體內帳號。
     /// @param account 即將用於連線的帳號，更新成功後原地修改。
     /// @return 工作階段可用或登入／儲存錯誤。
-    async fn prepare_session(&self, account: &mut AccountRecord) -> CommandResult<()> {
-        match account.auth_kind {
+    async fn prepare_session(&self, account: &mut AccountSession) -> CommandResult<()> {
+        match account.account.auth_kind {
             AuthKind::Microsoft => self.prepare_microsoft(account).await,
             AuthKind::AccessToken => self.prepare_access_token(account).await,
             AuthKind::Cookie => self.prepare_cookie(account).await,
         }
     }
 
-    async fn prepare_microsoft(&self, account: &mut AccountRecord) -> CommandResult<()> {
+    async fn prepare_microsoft(&self, account: &mut AccountSession) -> CommandResult<()> {
         if session_is_current(account) {
             return Ok(());
         }
         let session = microsoft::refresh(
             &self.http_client,
-            account.credential.as_deref().unwrap_or_default(),
+            account.secrets.credential.as_deref().unwrap_or_default(),
         )
         .await
         .map_err(|_| ACCESS_TOKEN_INVALID.to_owned())?;
         self.save_microsoft_session(account, session).await
     }
 
-    async fn prepare_access_token(&self, account: &mut AccountRecord) -> CommandResult<()> {
-        if account.session_token.is_some() {
+    async fn prepare_access_token(&self, account: &mut AccountSession) -> CommandResult<()> {
+        if account.secrets.session_token.is_some() {
             if session_is_current(account) {
                 return Ok(());
             }
             let session = microsoft::refresh_legacy(
                 &self.http_client,
-                account.credential.as_deref().unwrap_or_default(),
+                account.secrets.credential.as_deref().unwrap_or_default(),
             )
             .await
             .map_err(|_| ACCESS_TOKEN_INVALID.to_owned())?;
@@ -108,8 +109,15 @@ impl UserRuntime {
         }
 
         let expires_at = account
+            .account
             .session_expires_at
-            .or_else(|| account.credential.as_deref().and_then(access_token::expiry))
+            .or_else(|| {
+                account
+                    .secrets
+                    .credential
+                    .as_deref()
+                    .and_then(access_token::expiry)
+            })
             .ok_or_else(|| ACCESS_TOKEN_INVALID.to_owned())?;
         if expires_at <= Utc::now() {
             return Err(ACCESS_TOKEN_EXPIRED.to_owned());
@@ -117,15 +125,15 @@ impl UserRuntime {
         Ok(())
     }
 
-    async fn prepare_cookie(&self, account: &mut AccountRecord) -> CommandResult<()> {
+    async fn prepare_cookie(&self, account: &mut AccountSession) -> CommandResult<()> {
         if session_is_current(account) {
             return Ok(());
         }
 
-        let session = cookie::exchange(account.credential.as_deref().unwrap_or_default())
+        let session = cookie::exchange(account.secrets.credential.as_deref().unwrap_or_default())
             .await
             .map_err(|error| error.to_string())?;
-        let account_id = account.id.clone();
+        let account_id = account.account.id.clone();
         let username = session.username.clone();
         let uuid = session.uuid.clone();
         let access_token = session.access_token.clone();
@@ -143,10 +151,10 @@ impl UserRuntime {
                 .map_err(|error| error.to_string())
         })
         .await?;
-        account.username = session.username;
-        account.profile_id = Some(session.uuid);
-        account.session_token = Some(session.access_token);
-        account.session_expires_at = Some(session.expires_at);
+        account.account.username = session.username;
+        account.account.profile_id = Some(session.uuid);
+        account.secrets.session_token = Some(session.access_token);
+        account.account.session_expires_at = Some(session.expires_at);
         Ok(())
     }
 
@@ -156,10 +164,10 @@ impl UserRuntime {
     /// @return 儲存結果；寫入失敗不改動呼叫端快照。
     async fn save_microsoft_session(
         &self,
-        account: &mut AccountRecord,
+        account: &mut AccountSession,
         session: microsoft::MicrosoftSession,
     ) -> CommandResult<()> {
-        let account_id = account.id.clone();
+        let account_id = account.account.id.clone();
         let username = session.username.clone();
         let uuid = session.uuid.clone();
         let refresh_token = session.refresh_token.clone();
@@ -178,11 +186,11 @@ impl UserRuntime {
                 .map_err(|error| error.to_string())
         })
         .await?;
-        account.username = session.username;
-        account.profile_id = Some(session.uuid);
-        account.credential = Some(session.refresh_token);
-        account.session_token = Some(session.access_token);
-        account.session_expires_at = Some(session.expires_at);
+        account.account.username = session.username;
+        account.account.profile_id = Some(session.uuid);
+        account.secrets.credential = Some(session.refresh_token);
+        account.secrets.session_token = Some(session.access_token);
+        account.account.session_expires_at = Some(session.expires_at);
         Ok(())
     }
 }
@@ -190,11 +198,12 @@ impl UserRuntime {
 /// 優先使用工作階段權杖，無工作階段時才使用帳號憑據。
 /// @param account 已完成登入準備的帳號。
 /// @return 非空 access token；缺失時回傳固定錯誤代碼。
-fn active_access_token(account: &AccountRecord) -> CommandResult<String> {
+fn active_access_token(account: &AccountSession) -> CommandResult<String> {
     account
+        .secrets
         .session_token
         .clone()
-        .or_else(|| account.credential.clone())
+        .or_else(|| account.secrets.credential.clone())
         .filter(|token| !token.trim().is_empty())
         .ok_or_else(|| ACCESS_TOKEN_INVALID.to_owned())
 }
@@ -203,9 +212,10 @@ fn active_access_token(account: &AccountRecord) -> CommandResult<String> {
 /// 判斷現有權杖是否仍有至少一分鐘連線緩衝。
 /// @param account 含工作階段權杖及期限的帳號。
 /// @return 權杖存在且期限足夠時為 true。
-fn session_is_current(account: &AccountRecord) -> bool {
-    account.session_token.is_some()
+fn session_is_current(account: &AccountSession) -> bool {
+    account.secrets.session_token.is_some()
         && account
+            .account
             .session_expires_at
             .is_some_and(|expires_at| expires_at > Utc::now() + Duration::minutes(1))
 }
