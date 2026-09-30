@@ -22,18 +22,23 @@ mod state;
 
 use anyhow::Result;
 pub use models::{AccountRecord, AccountSession, AuthKind, CreateAccountInput, UserSettings};
+use std::sync::{Arc, Mutex};
 
 /// 目前 Windows 使用者的 DPAPI／Registry 儲存入口；讀改寫須由呼叫端序列化。
+#[derive(Clone)]
 pub struct Store {
     registry_path: String,
+    state_lock: Arc<Mutex<()>>,
 }
 
 impl Store {
     /// 開啟既有儲存鍵，不變更已存資料。
-    /// @return 可用的 Store；非 Windows 或 Registry 開啟失敗時回傳錯誤。
+    ///
+    /// 非 Windows 或 Registry 開啟失敗時回傳錯誤。
     pub fn open() -> Result<Self> {
         let store = Self {
             registry_path: registry::DEFAULT_PATH.to_owned(),
+            state_lock: Arc::new(Mutex::new(())),
         };
         registry::ensure_key(&store.registry_path)?;
         Ok(store)
@@ -43,6 +48,7 @@ impl Store {
     fn open_at(path: String) -> Result<Self> {
         let store = Self {
             registry_path: path,
+            state_lock: Arc::new(Mutex::new(())),
         };
         registry::ensure_key(&store.registry_path)?;
         Ok(store)
@@ -168,6 +174,84 @@ mod tests {
             .update_auth_session(&account.id, "Example", "not-a-uuid", None, "token", None)
             .is_err());
         assert!(test.store.update_server_address(&account.id, "  ").is_err());
+    }
+
+    #[test]
+    fn reads_legacy_flat_account_secrets() {
+        let json = r#"{
+            "version": 1,
+            "accounts": [{
+                "id": "account-id",
+                "username": "Example",
+                "profile_id": "01234567-89ab-cdef-0123-456789abcdef",
+                "auth_kind": "microsoft",
+                "credential": "refresh-token",
+                "session_token": "access-token",
+                "session_expires_at": null,
+                "server_address": "play.example.net",
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:00Z",
+                "credential_checked_at": null
+            }],
+            "settings": {}
+        }"#;
+        let state: super::state::PersistedState =
+            serde_json::from_str(json).expect("decode existing flat account format");
+        let secrets = &state.accounts[0].secrets;
+        assert_eq!(secrets.credential.as_deref(), Some("refresh-token"));
+        assert_eq!(secrets.session_token.as_deref(), Some("access-token"));
+        let encoded = serde_json::to_value(state).expect("encode account state");
+        let account = &encoded["accounts"][0];
+        assert_eq!(account["credential"], "refresh-token");
+        assert_eq!(account["session_token"], "access-token");
+        assert!(account.get("secrets").is_none());
+    }
+
+    #[test]
+    fn cloned_stores_serialize_read_modify_write_updates() {
+        let test = TestStore::new();
+        let account = test
+            .store
+            .create_account(
+                CreateAccountInput {
+                    username: "Example".to_owned(),
+                    auth_kind: AuthKind::Cookie,
+                    credential: Some("cookie-data".to_owned()),
+                    server_address: "play.example.net".to_owned(),
+                },
+                None,
+                Some("session-token".to_owned()),
+                None,
+            )
+            .expect("create account");
+        let first = test.store.clone();
+        let second = test.store.clone();
+        let first_id = account.id.clone();
+        let second_id = account.id;
+        let first_update = std::thread::spawn(move || {
+            first.save_user_settings([("first".to_owned(), "1".to_owned())].into())
+        });
+        let second_update = std::thread::spawn(move || {
+            second.update_server_address(&second_id, "other.example.net")
+        });
+        first_update
+            .join()
+            .expect("first update thread")
+            .expect("save settings");
+        second_update
+            .join()
+            .expect("second update thread")
+            .expect("update address");
+        let settings = test.store.user_settings().expect("read settings");
+        assert_eq!(settings.get("first").map(String::as_str), Some("1"));
+        assert_eq!(
+            test.store
+                .account(&first_id)
+                .expect("read account")
+                .expect("account exists")
+                .server_address,
+            "other.example.net"
+        );
     }
 
     #[test]

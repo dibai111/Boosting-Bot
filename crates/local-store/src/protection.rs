@@ -16,14 +16,24 @@
 use anyhow::{bail, Context, Result};
 
 #[cfg(windows)]
+struct LocalFreeGuard(*mut core::ffi::c_void);
+
+#[cfg(windows)]
+impl Drop for LocalFreeGuard {
+    fn drop(&mut self) {
+        // SAFETY: DPAPI 配置的緩衝區由 LocalFree 釋放一次。
+        unsafe { windows_sys::Win32::Foundation::LocalFree(self.0) };
+    }
+}
+
+#[cfg(windows)]
 /// 以目前 Windows 使用者的 DPAPI 保護資料。
-/// @param data 待加密的完整狀態位元組。
-/// @return DPAPI 加密資料；API 失敗時回傳錯誤。
+///
+/// `data` 是待加密的完整狀態位元組；API 失敗時回傳錯誤。
 pub(crate) fn protect(data: &[u8]) -> Result<Vec<u8>> {
     use std::ptr::null;
-    use windows_sys::Win32::{
-        Foundation::LocalFree,
-        Security::Cryptography::{CryptProtectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB},
+    use windows_sys::Win32::Security::Cryptography::{
+        CryptProtectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
     };
 
     let data_length = u32::try_from(data.len()).context("local state is too large")?;
@@ -48,23 +58,18 @@ pub(crate) fn protect(data: &[u8]) -> Result<Vec<u8>> {
         return Err(std::io::Error::last_os_error()).context("protect local state with DPAPI");
     }
 
-    let protected = copy_blob(&output).context("read DPAPI output");
-    // SAFETY: 輸出由 CryptProtectData 配置，依 Windows 契約使用 LocalFree 恰好釋放一次。
-    unsafe { LocalFree(output.pbData.cast()) };
-    protected
+    let _guard = LocalFreeGuard(output.pbData.cast());
+    copy_blob(&output).context("read DPAPI output")
 }
 
 #[cfg(windows)]
 /// 解密目前使用者可存取的 DPAPI 資料。
-/// @param data Registry 讀出的加密位元組。
-/// @return 明文位元組；資料損壞或解密失敗時回傳錯誤。
+///
+/// `data` 是從 Registry 讀出的加密位元組；資料損壞或解密失敗時回傳錯誤。
 pub(crate) fn unprotect(data: &[u8]) -> Result<Vec<u8>> {
     use std::ptr::{null, null_mut};
-    use windows_sys::Win32::{
-        Foundation::LocalFree,
-        Security::Cryptography::{
-            CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
-        },
+    use windows_sys::Win32::Security::Cryptography::{
+        CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
     };
 
     let data_length = u32::try_from(data.len()).context("protected local state is too large")?;
@@ -89,16 +94,14 @@ pub(crate) fn unprotect(data: &[u8]) -> Result<Vec<u8>> {
         return Err(std::io::Error::last_os_error()).context("unprotect local state with DPAPI");
     }
 
-    let plaintext = copy_blob(&output).context("read DPAPI plaintext");
-    // SAFETY: 輸出由 CryptUnprotectData 配置，依 Windows 契約使用 LocalFree 恰好釋放一次。
-    unsafe { LocalFree(output.pbData.cast()) };
-    plaintext
+    let _guard = LocalFreeGuard(output.pbData.cast());
+    copy_blob(&output).context("read DPAPI plaintext")
 }
 
 #[cfg(windows)]
 /// 檢查 Windows 輸出指標並複製資料，不接管其配置。
-/// @param blob 仍有效且尚未 LocalFree 的 DPAPI 輸出。
-/// @return 獨立位元組陣列；非空長度搭配空指標時回傳錯誤。
+///
+/// `blob` 必須仍有效且尚未由 `LocalFree` 釋放；非空長度搭配空指標時回傳錯誤。
 fn copy_blob(
     blob: &windows_sys::Win32::Security::Cryptography::CRYPT_INTEGER_BLOB,
 ) -> Result<Vec<u8>> {

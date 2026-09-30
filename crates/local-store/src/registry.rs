@@ -32,8 +32,8 @@ use windows_sys::Win32::{
 };
 
 /// 確保目前使用者的 Registry 子鍵存在。
-/// @param path 相對於 HKEY_CURRENT_USER 的子鍵路徑。
-/// @return 開啟或建立結果；非 Windows 回傳不支援。
+///
+/// `path` 是相對於 `HKEY_CURRENT_USER` 的子鍵路徑；非 Windows 回傳不支援錯誤。
 pub(crate) fn ensure_key(path: &str) -> Result<()> {
     #[cfg(windows)]
     {
@@ -48,8 +48,8 @@ pub(crate) fn ensure_key(path: &str) -> Result<()> {
 }
 
 /// 限制大小與資料型別後讀取 State 值。
-/// @param path 目前使用者的儲存子鍵路徑。
-/// @return 二進位值；未設定時為 None，讀取期間增大時回傳錯誤。
+///
+/// `path` 是目前使用者的儲存子鍵路徑。未設定時回傳 `None`；讀取期間值增大時回傳錯誤。
 pub(crate) fn read_value(path: &str) -> Result<Option<Vec<u8>>> {
     #[cfg(windows)]
     {
@@ -111,9 +111,8 @@ pub(crate) fn read_value(path: &str) -> Result<Option<Vec<u8>>> {
 }
 
 /// 將加密位元組以 REG_BINARY 寫入 State 值。
-/// @param path 目前使用者的儲存子鍵路徑。
-/// @param bytes 已加密且不超過 MAX_VALUE_BYTES 的資料。
-/// @return Registry 寫入結果。
+///
+/// `bytes` 必須已加密且不超過 `MAX_VALUE_BYTES`。
 pub(crate) fn write_value(path: &str, bytes: &[u8]) -> Result<()> {
     #[cfg(windows)]
     {
@@ -168,9 +167,8 @@ pub(crate) fn delete_key(path: &str) -> Result<()> {
 
 #[cfg(windows)]
 /// 以所需存取權開啟或建立 Registry 子鍵。
-/// @param path 相對於 HKEY_CURRENT_USER 的子鍵路徑。
-/// @param create true 時建立子鍵並取得寫入權限。
-/// @return 會自動關閉 handle 的 RAII 守衛。
+///
+/// `path` 相對於 `HKEY_CURRENT_USER`。`create` 為 true 時建立子鍵並取得寫入權限。
 fn open_key(path: &str, create: bool) -> Result<RegistryKey> {
     let subkey = wide(path);
     let mut key = ptr::null_mut();

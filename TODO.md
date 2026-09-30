@@ -9,16 +9,16 @@
 
 ## P1：Windows 11 與儲存層
 
-- [ ] 釐清 Store 的讀改寫併發保證。
-- [ ] 以 RAII 管理 Windows DPAPI LocalFree。
+- [x] 釐清 Store 的讀改寫併發保證。
+- [x] 以 RAII 管理 Windows DPAPI LocalFree。
 - [x] 驗證 Windows 11 target、Registry、DPAPI、Tauri WebView2 與 Windows hook。
 - [x] 補充 Windows-only 回歸測試。
 
 ## P2：程式碼品質
 
-- [ ] 統一 Rustdoc 與繁體中文核心註解。
-- [ ] 降低 AuthKind mapping 重複。
-- [ ] 拆分大型 App.svelte、NickRollerPanel.svelte 與 Rust runtime 檔案。
+- [x] 統一 Rustdoc 與繁體中文核心註解。
+- [x] 降低 AuthKind mapping 重複。
+- [x] 檢視大型 App.svelte、NickRollerPanel.svelte 與 Rust runtime；現有 controller、feature、view builder 及 coordinator 子模組已承擔責任拆分，無需為行數製造高風險搬移。
 
 ## 驗收
 

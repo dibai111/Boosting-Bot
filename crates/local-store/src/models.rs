@@ -28,18 +28,6 @@ pub enum AuthKind {
     Cookie,
 }
 
-impl AuthKind {
-    /// 取得登入方式的固定傳輸名稱。
-    /// @return 與 serde 契約一致的靜態字串。
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Microsoft => "microsoft",
-            Self::AccessToken => "access_token",
-            Self::Cookie => "cookie",
-        }
-    }
-}
-
 impl TryFrom<&str> for AuthKind {
     type Error = String;
 
@@ -74,7 +62,7 @@ pub struct AccountSecrets {
     pub session_token: Option<String>,
 }
 
-/// 後端登入工作階段；包含秘密的型別不會暴露為 crate 公開 API。
+/// 後端登入工作階段；公開帳號資料與秘密分開保存，避免 IPC 誤傳。
 #[derive(Debug, Clone)]
 pub struct AccountSession {
     pub account: AccountRecord,

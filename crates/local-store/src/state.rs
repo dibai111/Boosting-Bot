@@ -38,6 +38,7 @@ pub(crate) struct StoredAccount {
     pub username: String,
     pub profile_id: Option<String>,
     pub auth_kind: crate::AuthKind,
+    #[serde(flatten)]
     pub(crate) secrets: AccountSecrets,
     pub session_expires_at: Option<DateTime<Utc>>,
     pub server_address: String,
@@ -67,7 +68,8 @@ impl PersistedState {
 
 impl Store {
     /// 讀取加密值，解密後檢查大小、JSON 及格式版本。
-    /// @return 已驗證狀態；首次使用回傳空狀態。
+    ///
+    /// 首次使用時回傳空狀態。
     pub(crate) fn read_state(&self) -> Result<PersistedState> {
         let Some(protected) = registry::read_value(&self.registry_path)? else {
             return Ok(PersistedState::default());
@@ -83,8 +85,8 @@ impl Store {
     }
 
     /// 驗證與序列化狀態，經 DPAPI 加密後寫入 Registry。
-    /// @param state 完整且版本相容的待存狀態。
-    /// @return 寫入結果；過大資料或加密失敗時回傳錯誤。
+    ///
+    /// `state` 必須是完整且版本相容的狀態；過大資料或加密失敗時回傳錯誤。
     pub(crate) fn write_state(&self, state: &PersistedState) -> Result<()> {
         state.validate()?;
         let plaintext = serde_json::to_vec(state).context("encode local state")?;
@@ -95,14 +97,18 @@ impl Store {
         registry::write_value(&self.registry_path, &protected)
     }
 
-    // 呼叫端須持有 Store 的共用鎖；更新失敗時不寫入任何部分修改。
-    /// 在同一次讀改寫中套用更新；呼叫端必須持有共用 Store 鎖。
-    /// @param update 修改快照的閉包；回傳錯誤時不寫入。
-    /// @return 更新結果；只有寫回成功才回傳成功值。
+    /// 在同一次受保護的讀改寫中套用更新；更新失敗時不寫入部分修改。
+    /// `update` 修改快照；閉包回傳錯誤時不寫入。
+    ///
+    /// 只有寫回成功才回傳成功值。
     pub(crate) fn update_state<T, F>(&self, update: F) -> Result<T>
     where
         F: FnOnce(&mut PersistedState) -> Result<T>,
     {
+        let _guard = self
+            .state_lock
+            .lock()
+            .map_err(|_| anyhow::anyhow!("local store lock poisoned"))?;
         let mut state = self.read_state()?;
         let result = update(&mut state)?;
         self.write_state(&state)?;

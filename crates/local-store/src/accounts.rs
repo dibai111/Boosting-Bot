@@ -27,7 +27,8 @@ const ACCOUNT_ALREADY_EXISTS: &str = "account_already_exists";
 
 impl Store {
     /// 讀取帳號快照並依建立時間排序。
-    /// @return 帳號清單；序列化時排除後端憑據。
+    ///
+    /// 回傳資料只包含公開欄位，不包含後端憑據。
     pub fn list_accounts(&self) -> Result<Vec<AccountRecord>> {
         let mut accounts = self
             .read_state()?
@@ -40,15 +41,16 @@ impl Store {
     }
 
     /// 查詢目前儲存的帳號數量。
-    /// @return 帳號數；超出 u32 或讀取失敗時回傳錯誤。
+    ///
+    /// 超出 `u32` 或讀取失敗時回傳錯誤。
     pub fn account_count(&self) -> Result<u32> {
         u32::try_from(self.read_state()?.accounts.len())
             .context("account count exceeds supported range")
     }
 
     /// 以本機識別碼尋找帳號。
-    /// @param id 本機帳號 UUID，並非 Minecraft UUID。
-    /// @return 找到的帳號；不存在時為 None。
+    ///
+    /// `id` 是本機帳號 UUID，並非 Minecraft UUID。找不到時回傳 `None`。
     pub fn account(&self, id: &str) -> Result<Option<AccountRecord>> {
         Ok(self
             .read_state()?
@@ -70,12 +72,10 @@ impl Store {
                 secrets: stored.secrets,
             }))
     }
+
     /// 拒絕重複 Minecraft UUID 後建立帳號，成功才寫回儲存。
-    /// @param input 登入方式、憑據、名稱與伺服器地址。
-    /// @param profile_id 已驗證的 Minecraft UUID。
-    /// @param session_token 已交換取得的 Minecraft access token。
-    /// @param session_expires_at 工作階段 UTC 到期時間。
-    /// @return 新帳號；重複 UUID 或儲存失敗時回傳錯誤。
+    ///
+    /// 憑據只會寫入加密的後端狀態；重複 UUID 或儲存失敗時回傳錯誤。
     pub fn create_account(
         &self,
         input: CreateAccountInput,
@@ -120,8 +120,8 @@ impl Store {
     }
 
     /// 批次移除指定帳號，重複或不存在的 ID 不重複計數。
-    /// @param ids 要刪除的本機帳號 ID。
-    /// @return 實際刪除筆數。
+    ///
+    /// `ids` 是待刪除的本機帳號識別碼；回傳實際移除筆數。
     pub fn delete_accounts(&self, ids: &[String]) -> Result<usize> {
         let ids: HashSet<&str> = ids.iter().map(String::as_str).collect();
         self.update_state(|state| {
@@ -134,9 +134,8 @@ impl Store {
     }
 
     /// 更新帳號的目標伺服器及修改時間。
-    /// @param id 本機帳號 ID。
-    /// @param address 會去除首尾空白的伺服器地址。
-    /// @return 儲存結果；帳號不存在時不新增資料。
+    ///
+    /// `address` 會去除首尾空白；帳號不存在或地址為空時回傳錯誤。
     pub fn update_server_address(&self, id: &str, address: &str) -> Result<()> {
         let address = address.trim();
         if address.is_empty() {
@@ -155,10 +154,8 @@ impl Store {
     }
 
     /// 同步登入事件帶回的玩家資料。
-    /// @param id 本機帳號 ID。
-    /// @param username 已驗證的玩家名稱。
-    /// @param profile_id 新 Minecraft UUID；None 時保留原值。
-    /// @return 儲存結果；帳號不存在時不新增資料。
+    ///
+    /// `profile_id` 為 `None` 時保留原值；帳號不存在或資料無效時回傳錯誤。
     pub fn update_profile(&self, id: &str, username: &str, profile_id: Option<&str>) -> Result<()> {
         let username = username.trim();
         if username.is_empty() {
@@ -185,13 +182,9 @@ impl Store {
     }
 
     /// 一次更新玩家資料、憑據與工作階段期限。
-    /// @param id 本機帳號 ID。
-    /// @param username 已驗證的玩家名稱。
-    /// @param profile_id 已驗證的 Minecraft UUID。
-    /// @param credential 新登入憑據；None 時保留原憑據。
-    /// @param session_token 新 Minecraft access token。
-    /// @param expires_at UTC 到期時間。
-    /// @return 儲存結果；帳號不存在時不新增資料。
+    ///
+    /// `credential` 為 `None` 時保留原憑據；`expires_at` 使用 UTC。
+    /// 帳號不存在、UUID 無效或 session token 為空時回傳錯誤。
     pub fn update_auth_session(
         &self,
         id: &str,
@@ -271,8 +264,8 @@ fn ensure_unique_profile_id(
 }
 
 /// 正規化 UUID 的字面差異，供重複帳號比對。
-/// @param profile_id 帶連字號或大小寫差異的 UUID。
-/// @return 去除空白、連字號並轉成小寫的識別碼。
+///
+/// 移除空白與連字號並轉成小寫。
 fn normalize_profile_id(profile_id: &str) -> String {
     profile_id
         .trim()

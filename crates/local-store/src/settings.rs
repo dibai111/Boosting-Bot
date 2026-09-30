@@ -22,14 +22,15 @@ const MAX_SETTING_VALUE_BYTES: usize = 16 * 1024;
 
 impl Store {
     /// 讀取使用者設定完整快照。
-    /// @return 設定鍵值表；讀取或解密失敗時回傳錯誤。
+    ///
+    /// 回傳設定鍵值表；讀取或解密失敗時回傳錯誤。
     pub fn user_settings(&self) -> Result<UserSettings> {
         Ok(self.read_state()?.settings)
     }
 
     /// 驗證設定數量與字串長度後替換整份設定。
-    /// @param settings 完整設定快照；呼叫端需避免舊快照覆蓋新值。
-    /// @return 驗證及儲存結果。
+    ///
+    /// `settings` 是完整快照，更新會由 `Store` 的鎖序列化。
     pub fn save_user_settings(&self, settings: UserSettings) -> Result<()> {
         if settings.len() > MAX_SETTINGS {
             bail!("too many local settings")
