@@ -18,7 +18,10 @@ use crate::app_state::CommandResult;
 
 impl UserRuntime {
     /// 加總主程序及子程序的專用工作集。
-    /// @return 位元組數；非 Windows 或主程序讀取失敗時回傳錯誤。
+    ///
+    /// # 回傳
+    ///
+    /// 位元組數；非 Windows 或主程序讀取失敗時回傳錯誤。
     pub(crate) async fn app_memory_bytes(&self) -> CommandResult<u64> {
         process_tree_private_working_set(std::process::id()).map_err(|error| error.to_string())
     }

@@ -33,7 +33,7 @@ use std::{
 pub(crate) use events::BotEventBus;
 pub(crate) use model::{
     BotCommand, BotConfig, BotEvent, BotGamePhase, BotPhase, DuelPitchDirection, GameKind,
-    GameMode, MatchAttempt, RuntimeMode,
+    GameMode, MatchAttempt, RuntimeMode, RuntimeModeSnapshot,
 };
 pub(crate) use nick_roller::NickRollerConfig;
 
@@ -64,14 +64,21 @@ pub(super) struct SessionEmitter {
 
 impl SessionEmitter {
     /// 取得事件發送器所屬帳號。
-    /// @return 本機 Bot ID 的借用字串。
+    ///
+    /// # 回傳
+    ///
+    /// 本機 Bot ID 的借用字串。
     pub(super) fn bot_id(&self) -> &str {
         &self.bot_id
     }
 
     /// 只有事件仍屬目前連線 generation 時才廣播。
-    /// @param event 此 Bot 工作階段產生的事件。
-    /// @return 無回傳值；runtime 已釋放或事件過期時丟棄。
+    ///
+    /// # 參數
+    ///
+    /// - `event` 此 Bot 工作階段產生的事件。
+    ///
+    /// runtime 已釋放或事件過期時丟棄。
     pub(super) fn publish(&self, event: BotEvent) {
         let Some(runtime) = self.runtime.upgrade() else {
             return;
@@ -91,8 +98,14 @@ impl SessionEmitter {
 
 impl BotRuntime {
     /// 建立空的 Bot runtime。
-    /// @param events 提供給每個工作階段的事件匯流排。
-    /// @return 可接收啟動要求的 runtime。
+    ///
+    /// # 參數
+    ///
+    /// - `events` 提供給每個工作階段的事件匯流排。
+    ///
+    /// # 回傳
+    ///
+    /// 可接收啟動要求的 runtime。
     pub(crate) fn new(events: BotEventBus) -> Self {
         Self {
             inner: Arc::new(RuntimeInner {
@@ -103,8 +116,14 @@ impl BotRuntime {
     }
 
     /// 取代指定 Bot 的舊連線，並拒絕被較新啟動要求取代的結果。
-    /// @param config 已驗證的帳號、權杖及伺服器設定。
-    /// @return 工作階段建立結果；連線狀態另由事件發布。
+    ///
+    /// # 參數
+    ///
+    /// - `config` 已驗證的帳號、權杖及伺服器設定。
+    ///
+    /// # 回傳
+    ///
+    /// 工作階段建立結果；連線狀態另由事件發布。
     pub(crate) async fn start(&self, config: BotConfig) -> Result<()> {
         let bot_id = config.bot_id.clone();
         let (generation, previous) = {
@@ -175,23 +194,41 @@ impl BotRuntime {
     }
 
     /// 以使用者停止原因關閉 Bot。
-    /// @param bot_id 本機帳號 ID。
-    /// @return 停止結果；不存在的工作階段視為成功。
+    ///
+    /// # 參數
+    ///
+    /// - `bot_id` 本機帳號 ID。
+    ///
+    /// # 回傳
+    ///
+    /// 停止結果；不存在的工作階段視為成功。
     pub(crate) async fn stop(&self, bot_id: &str) -> Result<()> {
         self.stop_with_reason(bot_id, "Stopped from Botting").await
     }
 
     /// 以帳號移除原因關閉 Bot。
-    /// @param bot_id 即將刪除的本機帳號 ID。
-    /// @return 停止結果。
+    ///
+    /// # 參數
+    ///
+    /// - `bot_id` 即將刪除的本機帳號 ID。
+    ///
+    /// # 回傳
+    ///
+    /// 停止結果。
     pub(crate) async fn remove(&self, bot_id: &str) -> Result<()> {
         self.stop_with_reason(bot_id, "Account removed").await
     }
 
     /// 複製目前指令通道後釋放同步鎖，再等待通道容量。
-    /// @param bot_id 要接收指令的 Bot ID。
-    /// @param command 配對、聊天或 Nick 業務指令。
-    /// @return 指令入列結果，不代表服務端已執行。
+    ///
+    /// # 參數
+    ///
+    /// - `bot_id` 要接收指令的 Bot ID。
+    /// - `command` 配對、聊天或 Nick 業務指令。
+    ///
+    /// # 回傳
+    ///
+    /// 指令入列結果，不代表服務端已執行。
     pub(crate) async fn command(&self, bot_id: &str, command: BotCommand) -> Result<()> {
         let sender = {
             let state = self.lock_state()?;
@@ -208,7 +245,10 @@ impl BotRuntime {
     }
 
     /// 拒絕新連線並依序等待所有工作階段停止。
-    /// @return 已接管的工作階段全部返回後完成。
+    ///
+    /// # 回傳
+    ///
+    /// 已接管的工作階段全部返回後完成。
     pub(crate) async fn shutdown(&self) {
         let sessions = {
             let Ok(mut state) = self.inner.state.lock() else {

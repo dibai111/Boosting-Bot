@@ -16,7 +16,7 @@
 use super::UserRuntime;
 use crate::{
     app_state::CommandResult,
-    bot_runtime::{BotCommand, NickRollerConfig, RuntimeMode},
+    bot_runtime::{BotCommand, NickRollerConfig, RuntimeModeSnapshot},
     input_limits::{validate_length, MAX_BOT_ID_BYTES},
 };
 use anyhow::bail;
@@ -34,12 +34,18 @@ pub(crate) struct StartNickRollerInput {
 
 impl UserRuntime {
     /// 驗證帳號及 Hypixel 地址後，向所選 Bot 發送篩選指令。
-    /// @param input Bot 清單及篩選設定；ID 會正規化與去重。
-    /// @return 至少一個指令送出成功時回傳 NickRoller，否則回傳錯誤。
+    ///
+    /// # 參數
+    ///
+    /// - `input` Bot 清單及篩選設定；ID 會正規化與去重。
+    ///
+    /// # 回傳
+    ///
+    /// 至少一個指令送出成功時回傳帶版本的模式快照，否則回傳錯誤。
     pub(crate) async fn start_nick_roller(
         &self,
         mut input: StartNickRollerInput,
-    ) -> CommandResult<RuntimeMode> {
+    ) -> CommandResult<RuntimeModeSnapshot> {
         normalize_bot_ids(&mut input.bot_ids).map_err(|error| error.to_string())?;
         validate_input(&input).map_err(|error| error.to_string())?;
         let accounts = self
@@ -47,28 +53,24 @@ impl UserRuntime {
             .await?;
         validate_accounts(&input.bot_ids, &accounts).map_err(|error| error.to_string())?;
 
-        self.reconcile_active_mode().await;
-        self.enter_mode(RuntimeMode::NickRoller).await?;
-        {
-            let mut bot_ids = self.nick_bot_ids.lock().await;
-            bot_ids.clear();
-            bot_ids.extend(input.bot_ids.iter().cloned());
-        }
+        let mut work = self.work.lock().await;
+        self.reconcile_work(&mut work).await;
+        let run_id = work.start_nick(input.bot_ids.iter().cloned(), &self.events)?;
         let config = input.config.clone().normalized();
 
         let mut failures = Vec::new();
         for bot_id in &input.bot_ids {
             let command = BotCommand::StartNickRoller {
+                run_id,
                 config: config.clone(),
             };
             if let Err(error) = self.bots.command(bot_id, command).await {
-                self.nick_bot_ids.lock().await.remove(bot_id);
+                work.complete_nick_bot(run_id, bot_id, &self.events);
                 failures.push(format!("{bot_id}: {error:#}"));
             }
         }
 
-        if self.nick_bot_ids.lock().await.is_empty() {
-            self.leave_mode(RuntimeMode::NickRoller).await;
+        if work.nick_participants().is_none() {
             let message = if failures.is_empty() {
                 "no Nick Roller bot could be started".to_owned()
             } else {
@@ -77,32 +79,39 @@ impl UserRuntime {
             return Err(message);
         }
 
-        Ok(RuntimeMode::NickRoller)
+        Ok(work.snapshot())
     }
 
     /// 向本次追蹤的 Bot 發送停止指令並清空模式追蹤。
-    /// @return 停止請求結果；已關閉的 Bot 通道可忽略。
-    pub(crate) async fn stop_nick_roller(&self) -> CommandResult<()> {
-        let bot_ids = self
-            .nick_bot_ids
-            .lock()
-            .await
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>();
-        for bot_id in bot_ids {
-            let _ = self.bots.command(&bot_id, BotCommand::StopNickRoller).await;
+    ///
+    /// # 回傳
+    ///
+    /// 停止請求結果；已關閉的 Bot 通道可忽略。
+    pub(crate) async fn stop_nick_roller(&self) -> CommandResult<RuntimeModeSnapshot> {
+        let mut work = self.work.lock().await;
+        if let Some((run_id, bot_ids)) = work.nick_participants() {
+            for bot_id in bot_ids {
+                let _ = self
+                    .bots
+                    .command(&bot_id, BotCommand::StopNickRoller { run_id })
+                    .await;
+            }
+            work.finish_nick(run_id, &self.events);
         }
-        self.nick_bot_ids.lock().await.clear();
-        self.leave_mode(RuntimeMode::NickRoller).await;
-        Ok(())
+        Ok(work.snapshot())
     }
 
     /// 將使用者對候選的決策交回 Bot 狀態機。
-    /// @param bot_id 候選所屬 Bot ID。
-    /// @param candidate_id 事件提供的候選編號。
-    /// @param take true 表示套用，false 表示跳過。
-    /// @return 模式檢查與指令發送結果；候選時效由狀態機檢查。
+    ///
+    /// # 參數
+    ///
+    /// - `bot_id` 候選所屬 Bot ID。
+    /// - `candidate_id` 事件提供的候選編號。
+    /// - `take` true 表示套用，false 表示跳過。
+    ///
+    /// # 回傳
+    ///
+    /// 模式檢查與指令發送結果；候選時效由狀態機檢查。
     pub(crate) async fn answer_nick_decision(
         &self,
         bot_id: String,
@@ -110,11 +119,17 @@ impl UserRuntime {
         take: bool,
     ) -> CommandResult<()> {
         validate_length(&bot_id, "bot id", MAX_BOT_ID_BYTES).map_err(|error| error.to_string())?;
-        if self.active_mode().await != RuntimeMode::NickRoller {
-            return Err("Nick Roller is not active".to_owned());
-        }
+        let work = self.work.lock().await;
+        let run_id = work.nick_run_for(&bot_id)?;
         self.bots
-            .command(&bot_id, BotCommand::NickDecision { candidate_id, take })
+            .command(
+                &bot_id,
+                BotCommand::NickDecision {
+                    run_id,
+                    candidate_id,
+                    take,
+                },
+            )
             .await
             .map_err(|error| error.to_string())
     }

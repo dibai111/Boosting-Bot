@@ -16,6 +16,19 @@ export type AuthKind = "microsoft" | "access_token" | "cookie";
 export type BotPhase =
   "offline" | "starting" | "authenticating" | "connecting" | "online" | "stopping" | "error";
 export type RuntimeMode = "idle" | "matching" | "nick_roller";
+
+/** 模式查詢與事件共用版本；Nick 執行識別用於區分同一模式的不同批次。 */
+export interface RuntimeModeSnapshot {
+  revision: number;
+  mode: RuntimeMode;
+  nick_run_id: number | null;
+}
+
+/** 原生浮動視窗的最後確認狀態，版本供前端捨棄晚到更新。 */
+export interface OverlaySnapshot {
+  revision: number;
+  visible: boolean;
+}
 export type NickRollerPhase =
   | "idle"
   | "preparing"
@@ -143,6 +156,7 @@ export interface MatchmakingBotState {
 }
 
 export interface MatchmakingSnapshot {
+  revision: number;
   session_id?: string | null;
   round_id?: string | null;
   phase: MatchmakingPhase;
@@ -160,7 +174,7 @@ export interface MatchmakingDiagnostic {
 }
 
 export type BotEvent =
-  | { type: "runtime_mode"; mode: RuntimeMode }
+  | ({ type: "runtime_mode" } & RuntimeModeSnapshot)
   | { type: "status"; bot_id: string; phase: BotPhase; message?: string | null }
   | { type: "profile"; bot_id: string; username: string; uuid?: string | null }
   | {

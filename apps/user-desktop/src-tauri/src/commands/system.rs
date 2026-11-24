@@ -18,8 +18,14 @@ use tauri::State;
 
 #[tauri::command]
 /// 查詢應用及子程序的專用工作集。
-/// @param state Tauri 管理的應用狀態。
-/// @return 位元組數或平台讀取錯誤。
+///
+/// # 參數
+///
+/// - `state` Tauri 管理的應用狀態。
+///
+/// # 回傳
+///
+/// 位元組數或平台讀取錯誤。
 pub(crate) async fn app_memory_bytes(state: State<'_, AppState>) -> CommandResult<u64> {
     state.runtime().app_memory_bytes().await
 }

@@ -13,4 +13,5 @@
 
 //! 集中平台相關能力，將 Windows 原生 API 與業務邏輯分開。
 
+pub(crate) mod overlay;
 pub(crate) mod shortcuts;

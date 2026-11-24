@@ -74,6 +74,8 @@ pub(crate) struct MatchmakingBotState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 /// 供 UI 及浮動視窗訂閱的完整配對進度。
 pub(crate) struct MatchmakingSnapshot {
+    /// 同一程序內的發布版本，跨工作階段與 Idle 重置仍持續遞增。
+    pub(crate) revision: u64,
     pub(crate) session_id: Option<String>,
     pub(crate) round_id: Option<String>,
     pub(crate) phase: MatchmakingPhase,
@@ -87,9 +89,13 @@ pub(crate) struct MatchmakingSnapshot {
 
 impl MatchmakingSnapshot {
     /// 建立沒有計畫及 Bot 的空閒快照。
-    /// @return 初始 MatchmakingSnapshot。
+    ///
+    /// # 回傳
+    ///
+    /// 初始 MatchmakingSnapshot。
     pub(crate) fn idle() -> Self {
         Self {
+            revision: 0,
             session_id: None,
             round_id: None,
             phase: MatchmakingPhase::Idle,

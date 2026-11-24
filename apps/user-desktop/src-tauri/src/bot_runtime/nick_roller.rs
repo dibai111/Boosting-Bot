@@ -90,7 +90,10 @@ impl Default for NickRollerConfig {
 
 impl NickRollerConfig {
     /// 將等待時間及篩選規則限制在後端支援範圍。
-    /// @return 正規化後的設定。
+    ///
+    /// # 回傳
+    ///
+    /// 正規化後的設定。
     pub(crate) fn normalized(mut self) -> Self {
         self.book_timeout_ms = self
             .book_timeout_ms
@@ -117,7 +120,10 @@ pub(crate) enum NickRollerPhase {
 
 impl NickRollerPhase {
     /// 判斷篩選是否已成功、失敗或被使用者停止。
-    /// @return 終止階段為 true；Idle 不視為終止事件。
+    ///
+    /// # 回傳
+    ///
+    /// 終止階段為 true；Idle 不視為終止事件。
     pub(crate) const fn is_terminal(self) -> bool {
         matches!(self, Self::Finished | Self::Failed | Self::Stopped)
     }
@@ -230,7 +236,10 @@ pub(super) struct NickRoller {
 
 impl NickRoller {
     /// 初始化空閒 Nick 狀態機及候選計數器。
-    /// @return 尚未啟動的 NickRoller。
+    ///
+    /// # 回傳
+    ///
+    /// 尚未啟動的 NickRoller。
     pub(super) fn new() -> Self {
         Self {
             config: NickRollerConfig::default(),
@@ -254,14 +263,23 @@ impl NickRoller {
     }
 
     /// 判斷是否仍在準備、篩選、決策或驗證。
-    /// @return 正在執行篩選時為 true。
+    ///
+    /// # 回傳
+    ///
+    /// 正在執行篩選時為 true。
     pub(super) fn is_active(&self) -> bool {
         self.phase.is_active()
     }
 
     /// 將一筆輸入推進為新狀態及待執行動作。
-    /// @param input 帶來源事件與時間的 NickInput。
-    /// @return 有序動作清單；過期或無關輸入回傳空清單。
+    ///
+    /// # 參數
+    ///
+    /// - `input` 帶來源事件與時間的 NickInput。
+    ///
+    /// # 回傳
+    ///
+    /// 有序動作清單；過期或無關輸入回傳空清單。
     pub(super) fn handle(&mut self, input: NickInput) -> Vec<NickAction> {
         match input {
             NickInput::Start { config, now } => self.start(config, now),
@@ -410,10 +428,16 @@ impl NickRoller {
 
     // 候選編號必須相符，遲到的介面決定不能套用到下一個候選。
     /// 只處理目前候選的決策，舊編號不會消耗新候選。
-    /// @param candidate_id 前端收到的候選編號。
-    /// @param take true 表示套用，false 表示跳過。
-    /// @param now 排程下一輪或確認期限的基準時間。
-    /// @return 套用或跳過所需的動作。
+    ///
+    /// # 參數
+    ///
+    /// - `candidate_id` 前端收到的候選編號。
+    /// - `take` true 表示套用，false 表示跳過。
+    /// - `now` 排程下一輪或確認期限的基準時間。
+    ///
+    /// # 回傳
+    ///
+    /// 套用或跳過所需的動作。
     fn decide(&mut self, candidate_id: u64, take: bool, now: Instant) -> Vec<NickAction> {
         let Some(candidate) = self.candidate.take() else {
             return Vec::new();
@@ -445,9 +469,15 @@ impl NickRoller {
     }
 
     /// 按優先規則與一般條件評估新名稱，累計接受／拒絕數。
-    /// @param nick 書本解析出的 Minecraft 名稱。
-    /// @param now 候選決策期限的基準時間。
-    /// @return 候選事件及可能的自動確認動作。
+    ///
+    /// # 參數
+    ///
+    /// - `nick` 書本解析出的 Minecraft 名稱。
+    /// - `now` 候選決策期限的基準時間。
+    ///
+    /// # 回傳
+    ///
+    /// 候選事件及可能的自動確認動作。
     fn process_nick(&mut self, nick: String, now: Instant) -> Vec<NickAction> {
         self.processed_count = self.processed_count.saturating_add(1);
         let decision = evaluate_nick(&nick, &self.config.rules);
@@ -512,9 +542,15 @@ impl NickRoller {
     }
 
     /// 比對服務端回傳名稱並結束候選驗證。
-    /// @param candidate_id 目前等待驗證的候選編號。
-    /// @param actual_nick 服務端確認名稱；逾時或無法讀取時為 None。
-    /// @return 驗證結果及終止狀態事件。
+    ///
+    /// # 參數
+    ///
+    /// - `candidate_id` 目前等待驗證的候選編號。
+    /// - `actual_nick` 服務端確認名稱；逾時或無法讀取時為 None。
+    ///
+    /// # 回傳
+    ///
+    /// 驗證結果及終止狀態事件。
     fn finish_confirmation(
         &mut self,
         candidate_id: u64,
@@ -603,8 +639,14 @@ struct Locraw {
 }
 
 /// 解析聊天中內嵌的 locraw JSON。
-/// @param message 可能含 JSON 位置回應的聊天文字。
-/// @return 位置資料；無法解析時為 None。
+///
+/// # 參數
+///
+/// - `message` 可能含 JSON 位置回應的聊天文字。
+///
+/// # 回傳
+///
+/// 位置資料；無法解析時為 None。
 fn extract_locraw(message: &str) -> Option<Locraw> {
     let start = message.find('{')?;
     let end = message.rfind('}')?;
@@ -622,8 +664,14 @@ fn extract_locraw(message: &str) -> Option<Locraw> {
 
 // 書本標記保留伺服器原文，勿隨中文註解或介面翻譯更動。
 /// 以服務端固定標記辨識隨機名稱及套用確認。
-/// @param book 已去除 Minecraft 物件格式的書本頁面。
-/// @return 解析出的候選名稱及確認結果。
+///
+/// # 參數
+///
+/// - `book` 已去除 Minecraft 物件格式的書本頁面。
+///
+/// # 回傳
+///
+/// 解析出的候選名稱及確認結果。
 fn read_book(book: &NickBook) -> BookResult {
     let text = book
         .pages

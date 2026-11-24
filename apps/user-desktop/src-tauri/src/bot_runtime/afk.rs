@@ -39,8 +39,14 @@ pub(super) struct AdvancedAfk {
 
 impl AdvancedAfk {
     /// 初始化尚未啟用的 AFK 排程。
-    /// @param now 初始單調時間。
-    /// @return 未啟用的控制器。
+    ///
+    /// # 參數
+    ///
+    /// - `now` 初始單調時間。
+    ///
+    /// # 回傳
+    ///
+    /// 未啟用的控制器。
     pub(super) fn new(now: Instant) -> Self {
         Self {
             active: false,
@@ -53,9 +59,15 @@ impl AdvancedAfk {
     }
 
     /// 啟用 AFK 並建立下一次動作時間。
-    /// @param bot 可執行動作的 client。
-    /// @param now 排程基準時間。
-    /// @return 由停用變成啟用時為 true。
+    ///
+    /// # 參數
+    ///
+    /// - `bot` 可執行動作的 client。
+    /// - `now` 排程基準時間。
+    ///
+    /// # 回傳
+    ///
+    /// 由停用變成啟用時為 true。
     pub(super) fn start(&mut self, bot: &Client, now: Instant) -> bool {
         if self.active {
             return false;
@@ -71,9 +83,13 @@ impl AdvancedAfk {
     }
 
     /// 執行到期動作，並解除已到期限的走動與蹲下。
-    /// @param bot 目前連線。
-    /// @param now 本次 Tick 時間。
-    /// @return 無回傳值；未啟用時直接返回。
+    ///
+    /// # 參數
+    ///
+    /// - `bot` 目前連線。
+    /// - `now` 本次 Tick 時間。
+    ///
+    /// 未啟用時直接返回。
     pub(super) fn tick(&mut self, bot: &Client, now: Instant) {
         if !self.active {
             return;
@@ -127,8 +143,14 @@ impl AdvancedAfk {
     }
 
     /// 清除持續動作及排程，角色仍連線時發送解除動作。
-    /// @param bot 可用 client；已斷線時可傳 None。
-    /// @return 停止前是否啟用。
+    ///
+    /// # 參數
+    ///
+    /// - `bot` 可用 client；已斷線時可傳 None。
+    ///
+    /// # 回傳
+    ///
+    /// 停止前是否啟用。
     pub(super) fn stop(&mut self, bot: Option<&Client>) -> bool {
         let was_active = self.active;
         self.active = false;

@@ -48,13 +48,10 @@ export interface BotFeatureState {
 export interface BotFeatureDependencies {
   api: Pick<
     UserApi,
-    | "startBot"
-    | "stopBot"
-    | "deleteAccounts"
-    | "updateServer"
-    | "stopMatchmaking"
-    | "hideMatchmakingOverlay"
+    "startBot" | "stopBot" | "deleteAccounts" | "updateServer" | "stopMatchmaking"
   >;
+  hideOverlay: () => Promise<void>;
+  applyMatchmakingSnapshot: (snapshot: MatchmakingSnapshot) => boolean;
   getState: () => BotFeatureState;
   patchState: (patch: Partial<BotFeatureState>) => void;
   phaseLabel: (phase: BotPhase) => string;
@@ -169,8 +166,8 @@ export function createBotFeature(deps: BotFeatureDependencies) {
   async function stopSession(): Promise<void> {
     const state = deps.getState();
     const matchmaking = await deps.api.stopMatchmaking();
-    deps.patchState({ matchmaking });
-    await deps.api.hideMatchmakingOverlay();
+    deps.applyMatchmakingSnapshot(matchmaking);
+    await deps.hideOverlay();
     await stopAccounts(
       state.accounts.filter((account) => (state.phases[account.id] ?? "offline") !== "offline"),
     );
@@ -261,8 +258,6 @@ export function createBotFeature(deps: BotFeatureDependencies) {
             : event.message || deps.phaseLabel(event.phase);
         deps.addLog(message, event.bot_id, event.phase === "error" ? "error" : "info");
       }
-    } else if (event.type === "runtime_mode") {
-      deps.patchState({ activeMode: event.mode });
     } else if (event.type === "profile") {
       deps.patchState({
         accounts: state.accounts.map((account) =>

@@ -17,19 +17,23 @@ use super::super::detector::real_name_joined_log;
 use super::super::modes::{bedwars, duels};
 use super::super::{BotMatchPhase, MatchmakingPhase};
 use super::flow::{matched_count, random_command_spam_retry_delay, should_withdraw_after_commit};
-use super::MatchmakingSession;
+use super::{MatchmakingSession, TimerKind};
 use crate::{
     bot_runtime::{BotCommand, GameKind, MatchAttempt},
     hypixel,
 };
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use uuid::Uuid;
 
 impl MatchmakingSession {
     /// 根據玩家轉服訊息啟動新輪次或重設目標。
-    /// @param server 已解析的玩家遊戲伺服器 ID。
-    /// @return 無回傳值；不相關轉服不更新狀態。
+    ///
+    /// # 參數
+    ///
+    /// - `server` 已解析的玩家遊戲伺服器 ID。
+    ///
+    /// 不相關轉服不更新狀態。
     pub(crate) async fn handle_player_server(self: &Arc<Self>, server: String) {
         let current = {
             let state = self.state.lock().await;
@@ -53,8 +57,12 @@ impl MatchmakingSession {
     }
 
     /// 撤回舊目標的 Bot，再為玩家新伺服器建立輪次。
-    /// @param server 新的玩家遊戲伺服器 ID。
-    /// @return 無回傳值；狀態改變透過快照通知。
+    ///
+    /// # 參數
+    ///
+    /// - `server` 新的玩家遊戲伺服器 ID。
+    ///
+    /// 狀態改變透過快照通知。
     pub(crate) async fn restart_for_new_player_server(self: &Arc<Self>, server: String) {
         self.reset_for_lobby("Player server changed; restarting matchmaking")
             .await;
@@ -62,8 +70,12 @@ impl MatchmakingSession {
     }
 
     /// 產生新輪次與嘗試 ID，將所選 Bot 送入遊戲佇列。
-    /// @param player_server 本輪要比對的玩家伺服器。
-    /// @return 無回傳值；沒有配對計畫時忽略。
+    ///
+    /// # 參數
+    ///
+    /// - `player_server` 本輪要比對的玩家伺服器。
+    ///
+    /// 沒有配對計畫時忽略。
     pub(crate) async fn start_round(self: &Arc<Self>, player_server: String) {
         let (commands, snapshot) = {
             let mut state = self.state.lock().await;
@@ -79,7 +91,7 @@ impl MatchmakingSession {
             state.reset_round();
             let generation = state.target_generation;
             let round_id = Uuid::new_v4().to_string();
-            state.round_started_at = Some(Instant::now());
+            state.round_started_at = Some(self.effects.now());
             state.snapshot.round_id = Some(round_id.clone());
             state.snapshot.phase = MatchmakingPhase::Matching;
             state.snapshot.player_server = Some(player_server);
@@ -113,18 +125,22 @@ impl MatchmakingSession {
 
         self.publish(snapshot);
         for (bot_id, command) in commands {
-            let _ = self.bots.command(&bot_id, command).await;
+            let _ = self.effects.command(&bot_id, command).await;
         }
     }
 
     /// 檢查來源識別碼，再依遊戲模式決定驗證或重試。
-    /// @param bot_id 本機 Bot ID。
-    /// @param round_id 目前配對輪次 ID。
-    /// @param generation 目標世代編號。
-    /// @param attempt_id 單次嘗試 ID。
-    /// @param session_id 整個配對工作階段 ID。
-    /// @param server Bot 實際轉入的伺服器。
-    /// @return 無回傳值；過期結果不更新狀態。
+    ///
+    /// # 參數
+    ///
+    /// - `bot_id` 本機 Bot ID。
+    /// - `round_id` 目前配對輪次 ID。
+    /// - `generation` 目標世代編號。
+    /// - `attempt_id` 單次嘗試 ID。
+    /// - `session_id` 整個配對工作階段 ID。
+    /// - `server` Bot 實際轉入的伺服器。
+    ///
+    /// 過期結果不更新狀態。
     pub(crate) async fn handle_attempt_result(
         self: &Arc<Self>,
         bot_id: &str,
@@ -226,11 +242,15 @@ impl MatchmakingSession {
         if skywars_mode && skywars_name_candidate {
             self.mark_matched(bot_id, None).await;
         } else if skywars_mode {
-            self.spawn_skywars_name_confirmation_timeout(
+            self.schedule_timer(
+                super::super::modes::skywars::CONFIRM_TIMEOUT,
                 bot_id.to_owned(),
                 generation,
-                attempt_id.to_owned(),
-            );
+                TimerKind::SkywarsName {
+                    attempt_id: attempt_id.to_owned(),
+                },
+            )
+            .await;
         } else if target_matches && duel_mode && duel_candidate {
             let pitch_enabled = {
                 let state = self.state.lock().await;
@@ -249,21 +269,29 @@ impl MatchmakingSession {
                 self.mark_matched(bot_id, Some(server)).await;
             }
         } else if target_matches && duel_mode {
-            self.spawn_duels_queue_confirmation_timeout(
+            self.schedule_timer(
+                duels::CONFIRM_TIMEOUT,
                 bot_id.to_owned(),
                 generation,
-                attempt_id.to_owned(),
-                server.to_owned(),
-            );
+                TimerKind::DuelsQueue {
+                    attempt_id: attempt_id.to_owned(),
+                    server: server.to_owned(),
+                },
+            )
+            .await;
         } else if target_matches && bedwars_mode && bedwars_candidate {
             self.confirm_queue_candidates().await;
         } else if target_matches && bedwars_mode {
-            self.spawn_bedwars_queue_confirmation_timeout(
+            self.schedule_timer(
+                bedwars::CONFIRM_TIMEOUT,
                 bot_id.to_owned(),
                 generation,
-                attempt_id.to_owned(),
-                server.to_owned(),
-            );
+                TimerKind::BedwarsQueue {
+                    attempt_id: attempt_id.to_owned(),
+                    server: server.to_owned(),
+                },
+            )
+            .await;
         } else {
             self.schedule_retry(
                 bot_id,
@@ -277,13 +305,17 @@ impl MatchmakingSession {
     }
 
     /// 只對目前嘗試安排重試，指令節流錯誤會加入延遲。
-    /// @param bot_id 本機 Bot ID。
-    /// @param round_id 目前配對輪次 ID。
-    /// @param generation 目標世代編號。
-    /// @param attempt_id 單次嘗試 ID。
-    /// @param code 穩定錯誤代碼。
-    /// @param message 服務端或工作階段提供的失敗原因。
-    /// @return 無回傳值；無效嘗試忽略。
+    ///
+    /// # 參數
+    ///
+    /// - `bot_id` 本機 Bot ID。
+    /// - `round_id` 目前配對輪次 ID。
+    /// - `generation` 目標世代編號。
+    /// - `attempt_id` 單次嘗試 ID。
+    /// - `code` 穩定錯誤代碼。
+    /// - `message` 服務端或工作階段提供的失敗原因。
+    ///
+    /// 無效嘗試忽略。
     pub(crate) async fn handle_attempt_failure(
         self: &Arc<Self>,
         bot_id: &str,
@@ -308,11 +340,17 @@ impl MatchmakingSession {
     }
 
     /// 同時核對配對階段、輪次、世代與嘗試 ID。
-    /// @param bot_id 本機 Bot ID。
-    /// @param round_id 目前配對輪次 ID。
-    /// @param generation 目標世代編號。
-    /// @param attempt_id 單次嘗試 ID。
-    /// @return 全部識別資訊仍有效時為 true。
+    ///
+    /// # 參數
+    ///
+    /// - `bot_id` 本機 Bot ID。
+    /// - `round_id` 目前配對輪次 ID。
+    /// - `generation` 目標世代編號。
+    /// - `attempt_id` 單次嘗試 ID。
+    ///
+    /// # 回傳
+    ///
+    /// 全部識別資訊仍有效時為 true。
     pub(crate) async fn is_current_attempt(
         &self,
         bot_id: &str,
@@ -331,9 +369,13 @@ impl MatchmakingSession {
     }
 
     /// 確認有效 Bot，達到最低數量後提交本輪並撤回其他 Bot。
-    /// @param bot_id 本機 Bot ID。
-    /// @param server 已確認的伺服器；名稱驗證模式可為 None。
-    /// @return 無回傳值；重複或已撤回的確認會忽略。
+    ///
+    /// # 參數
+    ///
+    /// - `bot_id` 本機 Bot ID。
+    /// - `server` 已確認的伺服器；名稱驗證模式可為 None。
+    ///
+    /// 重複或已撤回的確認會忽略。
     pub(crate) async fn mark_matched(&self, bot_id: &str, server: Option<&str>) {
         let (snapshot, withdraw) = {
             let mut state = self.state.lock().await;

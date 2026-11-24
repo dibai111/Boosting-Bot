@@ -14,7 +14,10 @@
 //! 在 Cargo 建置時產生 Tauri 必需的資源，設定變更後重新執行。
 
 /// 產生 Tauri 建置所需的資源與權限資料。
-/// @return 完成 Cargo build script；錯誤由 tauri-build 回報。
+///
+/// # 回傳
+///
+/// 完成 Cargo build script；錯誤由 tauri-build 回報。
 fn main() {
     println!("cargo:rerun-if-changed=tauri.conf.json");
     tauri_build::build()

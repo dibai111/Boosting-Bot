@@ -32,8 +32,14 @@ pub(crate) enum VisibleChatSignal {
 }
 
 /// 一次正規化聊天文字，辨識共用遊戲與佇列訊號。
-/// @param message Minecraft 可見聊天內容，不包含日誌前綴。
-/// @return 第一個符合的訊號；無關或空白訊息為 None。
+///
+/// # 參數
+///
+/// - `message` Minecraft 可見聊天內容，不包含日誌前綴。
+///
+/// # 回傳
+///
+/// 第一個符合的訊號；無關或空白訊息為 None。
 pub(crate) fn parse_visible_chat(message: &str) -> Option<VisibleChatSignal> {
     let plain = collapse_whitespace(message);
     if plain.is_empty() {
@@ -66,8 +72,14 @@ pub(crate) fn parse_visible_chat(message: &str) -> Option<VisibleChatSignal> {
 }
 
 /// 識別 mini 後接數字及英數字尾碼的遊戲伺服器。
-/// @param server 待判斷的伺服器識別字串。
-/// @return 符合遊戲伺服器格式時為 true。
+///
+/// # 參數
+///
+/// - `server` 待判斷的伺服器識別字串。
+///
+/// # 回傳
+///
+/// 符合遊戲伺服器格式時為 true。
 pub(crate) fn is_game_server(server: &str) -> bool {
     server.get(..4).is_some_and(|prefix| {
         prefix.eq_ignore_ascii_case("mini")
@@ -81,9 +93,15 @@ pub(crate) fn is_game_server(server: &str) -> bool {
 }
 
 /// 以不區分 ASCII 大小寫方式比對伺服器 ID。
-/// @param target 玩家目標伺服器。
-/// @param candidate Bot 觀察到的伺服器。
-/// @return 相同時為 true。
+///
+/// # 參數
+///
+/// - `target` 玩家目標伺服器。
+/// - `candidate` Bot 觀察到的伺服器。
+///
+/// # 回傳
+///
+/// 相同時為 true。
 pub(crate) fn server_matches(target: &str, candidate: &str) -> bool {
     target.eq_ignore_ascii_case(candidate)
 }

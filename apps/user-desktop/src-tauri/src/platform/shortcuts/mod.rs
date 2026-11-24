@@ -52,9 +52,15 @@ pub(crate) struct MatchmakingShortcuts;
 
 impl MatchmakingShortcuts {
     /// 解析兩個按鍵組合並原子更新 hook 設定。
-    /// @param stop 配對啟停按鍵。
-    /// @param show_overlay 浮動視窗切換按鍵。
-    /// @return 設定結果；無效、衝突或 hook 不可用時回傳錯誤。
+    ///
+    /// # 參數
+    ///
+    /// - `stop` 配對啟停按鍵。
+    /// - `show_overlay` 浮動視窗切換按鍵。
+    ///
+    /// # 回傳
+    ///
+    /// 設定結果；無效、衝突或 hook 不可用時回傳錯誤。
     pub(crate) fn configure(&self, stop: &str, show_overlay: &str) -> Result<(), String> {
         let pair = ShortcutPair {
             stop: parse_shortcut(stop)?,
@@ -69,8 +75,14 @@ impl MatchmakingShortcuts {
 }
 
 /// 啟動 Windows 鍵盤 hook 與事件轉送執行緒。
-/// @param app 目前 Tauri 應用控制柄。
-/// @return hook 及執行緒啟動結果。
+///
+/// # 參數
+///
+/// - `app` 目前 Tauri 應用控制柄。
+///
+/// # 回傳
+///
+/// hook 及執行緒啟動結果。
 pub(crate) fn start(app: AppHandle) -> io::Result<()> {
     let (sender, receiver) = mpsc::sync_channel(16);
     start_hook(DEFAULT_SHORTCUTS, sender)?;
@@ -85,8 +97,14 @@ pub(crate) fn start(app: AppHandle) -> io::Result<()> {
 }
 
 /// 將修飾鍵與實體按鍵名稱轉成 Windows 虛擬鍵規格。
-/// @param value 以加號分隔的快捷鍵字串。
-/// @return 已驗證規格，或穩定的快捷鍵錯誤代碼。
+///
+/// # 參數
+///
+/// - `value` 以加號分隔的快捷鍵字串。
+///
+/// # 回傳
+///
+/// 已驗證規格，或穩定的快捷鍵錯誤代碼。
 fn parse_shortcut(value: &str) -> Result<ShortcutSpec, String> {
     let mut modifiers = 0;
     let mut virtual_key = None;

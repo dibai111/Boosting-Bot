@@ -21,7 +21,8 @@ import type {
   MatchmakingDiagnostic,
   MatchmakingSnapshot,
   StartMatchmakingInput,
-  RuntimeMode,
+  RuntimeModeSnapshot,
+  OverlaySnapshot,
   StartNickRollerInput,
 } from "../models/types";
 
@@ -130,7 +131,7 @@ export const api = {
    * @param input Bot ID 與後端篩選設定。
    * @return 執行模式的 Promise。
    */
-  async startNickRoller(input: StartNickRollerInput): Promise<RuntimeMode> {
+  async startNickRoller(input: StartNickRollerInput): Promise<RuntimeModeSnapshot> {
     return invoke("start_nick_roller", { input });
   },
 
@@ -138,7 +139,7 @@ export const api = {
    * 停止後端追蹤的 Nick 篩選。
    * @return 停止請求的 Promise。
    */
-  async stopNickRoller(): Promise<void> {
+  async stopNickRoller(): Promise<RuntimeModeSnapshot> {
     return invoke("stop_nick_roller");
   },
 
@@ -157,7 +158,7 @@ export const api = {
    * 取得校正後的互斥工作模式。
    * @return 目前模式的 Promise。
    */
-  async activeMode(): Promise<RuntimeMode> {
+  async activeMode(): Promise<RuntimeModeSnapshot> {
     return invoke("get_active_mode");
   },
 
@@ -166,7 +167,7 @@ export const api = {
    * @param botCount 決定浮動視窗高度的 Bot 數。
    * @return 視窗操作的 Promise。
    */
-  async showMatchmakingOverlay(botCount: number): Promise<void> {
+  async showMatchmakingOverlay(botCount: number): Promise<OverlaySnapshot> {
     return invoke("show_matchmaking_overlay", { botCount });
   },
 
@@ -175,7 +176,7 @@ export const api = {
    * @param botCount 顯示時採用的 Bot 數。
    * @return 切換後可見狀態的 Promise。
    */
-  async toggleMatchmakingOverlay(botCount: number): Promise<boolean> {
+  async toggleMatchmakingOverlay(botCount: number): Promise<OverlaySnapshot> {
     return invoke("toggle_matchmaking_overlay", { botCount });
   },
 
@@ -183,8 +184,13 @@ export const api = {
    * 隱藏配對浮動視窗。
    * @return 隱藏完成的 Promise。
    */
-  async hideMatchmakingOverlay(): Promise<void> {
+  async hideMatchmakingOverlay(): Promise<OverlaySnapshot> {
     return invoke("hide_matchmaking_overlay");
+  },
+
+  /** 讀取原生視窗實際可見狀態與版本。 */
+  async overlaySnapshot(): Promise<OverlaySnapshot> {
+    return invoke("get_overlay_snapshot");
   },
 
   /**
@@ -291,8 +297,12 @@ export const api = {
    * @param handler 接收浮動視窗可見狀態的回呼。
    * @return 解除監聽函式的 Promise；呼叫端須在卸載時清理。
    */
-  async onMatchmakingOverlayVisibility(handler: (visible: boolean) => void): Promise<UnlistenFn> {
-    return listen<boolean>("matchmaking-overlay-visibility", ({ payload }) => handler(payload));
+  async onMatchmakingOverlayVisibility(
+    handler: (snapshot: OverlaySnapshot) => void,
+  ): Promise<UnlistenFn> {
+    return listen<OverlaySnapshot>("matchmaking-overlay-visibility", ({ payload }) =>
+      handler(payload),
+    );
   },
 };
 

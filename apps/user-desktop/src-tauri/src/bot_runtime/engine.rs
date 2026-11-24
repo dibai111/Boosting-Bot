@@ -28,8 +28,14 @@ pub(super) struct SessionHandle {
 
 impl SessionHandle {
     /// 送出停止指令並等待執行緒結束；五秒通知逾時不代表 join 有時限。
-    /// @param reason 提供給工作階段與 UI 的停止原因。
-    /// @return 執行緒 join 返回後完成。
+    ///
+    /// # 參數
+    ///
+    /// - `reason` 提供給工作階段與 UI 的停止原因。
+    ///
+    /// # 回傳
+    ///
+    /// 執行緒 join 返回後完成。
     pub(super) async fn stop(mut self, reason: &str) {
         let _ = self
             .commands
@@ -53,10 +59,16 @@ impl SessionHandle {
 }
 
 /// 為 Bot 建立獨立執行緒與單執行緒 Tokio runtime。
-/// @param config 已驗證的 Bot 連線設定。
-/// @param generation 這次連線的世代編號。
-/// @param emitter 只轉送本世代事件的發送器。
-/// @return 可停止的工作階段 handle，或執行緒建立錯誤。
+///
+/// # 參數
+///
+/// - `config` 已驗證的 Bot 連線設定。
+/// - `generation` 這次連線的世代編號。
+/// - `emitter` 只轉送本世代事件的發送器。
+///
+/// # 回傳
+///
+/// 可停止的工作階段 handle，或執行緒建立錯誤。
 pub(super) fn spawn(
     config: BotConfig,
     generation: u64,

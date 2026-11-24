@@ -18,18 +18,30 @@ use tauri::State;
 
 #[tauri::command]
 /// 啟動已保存帳號的 Bot。
-/// @param id 本機帳號 ID。
-/// @param state Tauri 管理的應用狀態。
-/// @return 啟動請求結果；連線進度由事件回報。
+///
+/// # 參數
+///
+/// - `id` 本機帳號 ID。
+/// - `state` Tauri 管理的應用狀態。
+///
+/// # 回傳
+///
+/// 啟動請求結果；連線進度由事件回報。
 pub(crate) async fn start_bot(id: String, state: State<'_, AppState>) -> CommandResult<()> {
     state.runtime().start_bot(id).await
 }
 
 #[tauri::command]
 /// 停止指定 Bot 工作階段。
-/// @param id 本機帳號 ID。
-/// @param state Tauri 管理的應用狀態。
-/// @return 停止結果。
+///
+/// # 參數
+///
+/// - `id` 本機帳號 ID。
+/// - `state` Tauri 管理的應用狀態。
+///
+/// # 回傳
+///
+/// 停止結果。
 pub(crate) async fn stop_bot(id: String, state: State<'_, AppState>) -> CommandResult<()> {
     state.runtime().stop_bot(id).await
 }

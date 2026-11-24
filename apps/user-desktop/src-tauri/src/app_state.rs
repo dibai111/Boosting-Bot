@@ -26,14 +26,23 @@ pub(crate) type CommandResult<T> = Result<T, String>;
 
 impl AppState {
     /// 包裝已建立的應用 runtime。
-    /// @param runtime 共用 UserRuntime。
-    /// @return 可由 Tauri manage 的狀態。
+    ///
+    /// # 參數
+    ///
+    /// - `runtime` 共用 UserRuntime。
+    ///
+    /// # 回傳
+    ///
+    /// 可由 Tauri manage 的狀態。
     pub(crate) fn new(runtime: Arc<UserRuntime>) -> Self {
         Self { runtime }
     }
 
     /// 取得可跨非同步工作使用的 runtime 參照。
-    /// @return 增加參照計數的 Arc 副本。
+    ///
+    /// # 回傳
+    ///
+    /// 增加參照計數的 Arc 副本。
     pub(crate) fn runtime(&self) -> Arc<UserRuntime> {
         Arc::clone(&self.runtime)
     }

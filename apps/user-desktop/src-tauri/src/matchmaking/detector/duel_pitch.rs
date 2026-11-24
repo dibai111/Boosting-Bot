@@ -30,11 +30,17 @@ pub(crate) struct Observation {
 }
 
 /// 排除舊世代、舊嘗試及本輪之前的手勢。
-/// @param observation 已保存的手勢觀察。
-/// @param generation 目前目標世代。
-/// @param attempt_id 目前嘗試 ID。
-/// @param round_started_at 本輪開始時間。
-/// @return 觀察仍有效時為 true。
+///
+/// # 參數
+///
+/// - `observation` 已保存的手勢觀察。
+/// - `generation` 目前目標世代。
+/// - `attempt_id` 目前嘗試 ID。
+/// - `round_started_at` 本輪開始時間。
+///
+/// # 回傳
+///
+/// 觀察仍有效時為 true。
 pub(crate) fn belongs_to_attempt(
     observation: &Observation,
     generation: u64,

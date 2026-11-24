@@ -36,7 +36,10 @@ use tokio::sync::broadcast::error::RecvError;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// 組裝 Tauri 指令、視窗事件及應用主迴圈。
-/// @return 視窗事件迴圈結束後返回；啟動失敗會 panic。
+///
+/// # 回傳
+///
+/// 視窗事件迴圈結束後返回；啟動失敗會 panic。
 pub fn run() {
     tauri::Builder::default()
         .setup(setup_app)
@@ -57,6 +60,7 @@ pub fn run() {
             commands::overlay::show_matchmaking_overlay,
             commands::overlay::toggle_matchmaking_overlay,
             commands::overlay::hide_matchmaking_overlay,
+            commands::overlay::get_overlay_snapshot,
             commands::shortcut::configure_matchmaking_shortcuts,
             commands::settings::get_user_settings,
             commands::settings::save_user_settings,
@@ -78,7 +82,10 @@ pub fn run() {
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 api.prevent_close();
                 if window.label() == commands::overlay::MATCHMAKING_OVERLAY_LABEL {
-                    let _ = window.hide();
+                    let app = window.app_handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        let _ = commands::overlay::hide_matchmaking_overlay(app).await;
+                    });
                     return;
                 }
                 let app = window.app_handle().clone();
@@ -95,23 +102,30 @@ pub fn run() {
 }
 
 /// 建立儲存、Bot、配對、快捷鍵及事件轉送服務。
-/// @param app 目前 Tauri 應用控制柄。
-/// @return 初始化結果；必要服務建立失敗時中止啟動。
+///
+/// # 參數
+///
+/// - `app` 目前 Tauri 應用控制柄。
+///
+/// # 回傳
+///
+/// 初始化結果；必要服務建立失敗時中止啟動。
 fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(DroppedFileAccess::default());
+    app.manage(platform::overlay::OverlayController::default());
     app.manage(shortcuts::MatchmakingShortcuts);
     shortcuts::start(app.handle().clone())?;
 
     let bot_events = BotEventBus::new();
     let bots = Arc::new(BotRuntime::new(bot_events.clone()));
     let matchmaking = Arc::new(MatchmakingSession::new(Arc::clone(&bots)));
-    let runtime = Arc::new(UserRuntime::new(
+    let runtime = UserRuntime::new(
         Store::open()?,
         bots,
         bot_events,
         reqwest::Client::new(),
         matchmaking,
-    ));
+    );
 
     app.manage(AppState::new(runtime));
     forward_bot_events(app.handle().clone());
@@ -120,22 +134,20 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// 消費後端事件，先更新應用狀態再轉送至前端。
-/// @param app 目前 Tauri 應用控制柄。
-/// @return 無回傳值；建立隨通道關閉而結束的背景任務。
+/// 轉送 runtime 已處理的通知；業務更新不依賴桌面訂閱。
+///
+/// # 參數
+///
+/// - `app` 目前 Tauri 應用控制柄。
+///
+/// 建立隨通道關閉而結束的背景任務。
 fn forward_bot_events(app: tauri::AppHandle) {
-    let mut events = app.state::<AppState>().runtime().subscribe_bot_events();
+    let mut events = app.state::<AppState>().runtime().take_bot_notifications();
     tauri::async_runtime::spawn(async move {
         loop {
-            let event = match events.recv().await {
-                Ok(event) => event,
-                Err(RecvError::Lagged(_)) => continue,
-                Err(RecvError::Closed) => break,
+            let Some(event) = events.recv().await else {
+                break;
             };
-            app.state::<AppState>()
-                .runtime()
-                .handle_bot_event(&event)
-                .await;
             let _ = app.emit("bot-event", event);
         }
     });

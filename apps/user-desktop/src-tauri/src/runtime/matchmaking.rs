@@ -16,14 +16,19 @@
 use super::UserRuntime;
 use crate::{
     app_state::CommandResult,
-    bot_runtime::RuntimeMode,
     matchmaking::{MatchmakingPlan, MatchmakingSnapshot, StartMatchmakingInput},
 };
 
 impl UserRuntime {
     /// 以儲存的玩家名稱編譯計畫，再進入配對模式。
-    /// @param input 模式、Bot 選擇、驗證選項及玩家日誌路徑。
-    /// @return 啟動快照；驗證、模式衝突或讀檔錯誤。
+    ///
+    /// # 參數
+    ///
+    /// - `input` 模式、Bot 選擇、驗證選項及玩家日誌路徑。
+    ///
+    /// # 回傳
+    ///
+    /// 啟動快照；驗證、模式衝突或讀檔錯誤。
     pub(crate) async fn start_matchmaking(
         &self,
         input: StartMatchmakingInput,
@@ -38,29 +43,37 @@ impl UserRuntime {
                 .map(|account| (account.id.clone(), account.username.clone())),
         )
         .map_err(|error| error.to_string())?;
-        self.reconcile_active_mode().await;
-        self.enter_mode(RuntimeMode::Matching).await?;
+        let mut work = self.work.lock().await;
+        self.reconcile_work(&mut work).await;
+        work.start_matching(&self.events)?;
         let result = self
             .matchmaking
             .start(plan)
             .await
             .map_err(|error| format!("start matchmaking: {error:#}"));
         if result.is_err() {
-            self.leave_mode(RuntimeMode::Matching).await;
+            work.finish_matching(&self.events);
         }
         result
     }
 
     /// 停止日誌追蹤並撤回 Bot，釋放配對工作模式。
-    /// @return 停止後的配對快照。
+    ///
+    /// # 回傳
+    ///
+    /// 停止後的配對快照。
     pub(crate) async fn stop_matchmaking(&self) -> MatchmakingSnapshot {
+        let mut work = self.work.lock().await;
         self.matchmaking.stop().await;
-        self.leave_mode(RuntimeMode::Matching).await;
+        work.finish_matching(&self.events);
         self.matchmaking.snapshot().await
     }
 
     /// 取得目前配對狀態副本。
-    /// @return 最新配對快照。
+    ///
+    /// # 回傳
+    ///
+    /// 最新配對快照。
     pub(crate) async fn matchmaking_snapshot(&self) -> MatchmakingSnapshot {
         self.matchmaking.snapshot().await
     }

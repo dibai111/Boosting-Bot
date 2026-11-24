@@ -83,25 +83,18 @@ impl Store {
         session_token: Option<String>,
         session_expires_at: Option<DateTime<Utc>>,
     ) -> Result<AccountRecord> {
+        let profile_id = profile_id.as_deref().map(normalize_profile_id);
         self.update_state(|state| {
             if let Some(profile_id) = profile_id.as_deref() {
-                let normalized_id = normalize_profile_id(profile_id);
-                validate_profile_id(&normalized_id)?;
-                if state.accounts.iter().any(|account| {
-                    account
-                        .profile_id
-                        .as_deref()
-                        .is_some_and(|value| normalize_profile_id(value) == normalized_id)
-                }) {
-                    bail!(ACCOUNT_ALREADY_EXISTS);
-                }
+                validate_profile_id(profile_id)?;
+                ensure_unique_profile_id(state, None, profile_id)?;
             }
 
             let now = Utc::now();
             let stored = StoredAccount {
                 id: Uuid::new_v4().to_string(),
                 username: input.username.trim().to_owned(),
-                profile_id: profile_id.map(|value| normalize_profile_id(&value)),
+                profile_id,
                 auth_kind: input.auth_kind,
                 secrets: AccountSecrets {
                     credential: input.credential,
@@ -170,7 +163,7 @@ impl Store {
                 .ok_or_else(|| anyhow::anyhow!("account_not_found"))?;
             if let Some(profile_id) = profile_id {
                 validate_profile_id(&profile_id)?;
-                ensure_unique_profile_id(state, id, &profile_id)?;
+                ensure_unique_profile_id(state, Some(id), &profile_id)?;
                 state.accounts[index].profile_id = Some(profile_id);
             }
             let account = &mut state.accounts[index];
@@ -209,7 +202,7 @@ impl Store {
                 .iter()
                 .position(|account| account.id == id)
                 .ok_or_else(|| anyhow::anyhow!("account_not_found"))?;
-            ensure_unique_profile_id(state, id, &profile_id)?;
+            ensure_unique_profile_id(state, Some(id), &profile_id)?;
             let account = &mut state.accounts[index];
             account.username = username.to_owned();
             account.profile_id = Some(profile_id);
@@ -246,13 +239,14 @@ fn validate_profile_id(profile_id: &str) -> Result<()> {
     Ok(())
 }
 
+/// 更新時略過帳號本身；舊資料也正規化後再比對。
 fn ensure_unique_profile_id(
     state: &crate::state::PersistedState,
-    id: &str,
+    excluded_account_id: Option<&str>,
     profile_id: &str,
 ) -> Result<()> {
     if state.accounts.iter().any(|account| {
-        account.id != id
+        Some(account.id.as_str()) != excluded_account_id
             && account
                 .profile_id
                 .as_deref()

@@ -20,7 +20,6 @@ use crate::bot_runtime::{BotCommand, BotGamePhase};
 
 impl MatchmakingSession {
     /// 玩家回大廳且已有目標時，清除本輪配對。
-    /// @return 無回傳值。
     pub(crate) async fn handle_player_lobby_joined(&self) {
         let has_active_target = self.state.lock().await.snapshot.player_server.is_some();
         if has_active_target {
@@ -29,11 +28,15 @@ impl MatchmakingSession {
     }
 
     /// 只接受目前輪次中已配對 Bot 的遊戲階段訊號。
-    /// @param bot_id 本機 Bot ID。
-    /// @param round_id 事件輪次 ID。
-    /// @param generation 事件目標世代。
-    /// @param game_state 遊戲開始或結束。
-    /// @return 無回傳值；無效來源忽略。
+    ///
+    /// # 參數
+    ///
+    /// - `bot_id` 本機 Bot ID。
+    /// - `round_id` 事件輪次 ID。
+    /// - `generation` 事件目標世代。
+    /// - `game_state` 遊戲開始或結束。
+    ///
+    /// 無效來源忽略。
     pub(crate) async fn handle_bot_game_state(
         &self,
         bot_id: &str,
@@ -60,7 +63,8 @@ impl MatchmakingSession {
     }
 
     /// 遊戲開始時檢查最低配對數，成功的 Bot 進入 AFK。
-    /// @return 無回傳值；數量不足則使本輪失敗。
+    ///
+    /// 數量不足則使本輪失敗。
     pub(crate) async fn handle_game_started(&self) {
         let (should_fail, snapshot) = {
             let mut state = self.state.lock().await;
@@ -97,9 +101,13 @@ impl MatchmakingSession {
     }
 
     /// 清除指定 Bot 的嘗試追蹤，更新摘要及可達成數量。
-    /// @param bot_id 本機 Bot ID。
-    /// @param message 不可用的原因。
-    /// @return 無回傳值；不足以達標時結束本輪。
+    ///
+    /// # 參數
+    ///
+    /// - `bot_id` 本機 Bot ID。
+    /// - `message` 不可用的原因。
+    ///
+    /// 不足以達標時結束本輪。
     pub(crate) async fn mark_unavailable(&self, bot_id: &str, message: &str) {
         let (should_fail, snapshot) = {
             let mut state = self.state.lock().await;
@@ -135,8 +143,12 @@ impl MatchmakingSession {
     }
 
     /// 使目前輪次失敗、清零已配對數量並撤回所有可用 Bot。
-    /// @param message 供快照及日誌顯示的失敗原因。
-    /// @return 無回傳值；未啟動計畫時忽略。
+    ///
+    /// # 參數
+    ///
+    /// - `message` 供快照及日誌顯示的失敗原因。
+    ///
+    /// 未啟動計畫時忽略。
     pub(crate) async fn fail_round(&self, message: impl Into<String>) {
         let bot_ids = {
             let mut state = self.state.lock().await;
@@ -161,8 +173,12 @@ impl MatchmakingSession {
     }
 
     /// 使舊世代失效，恢復等待玩家轉服的狀態。
-    /// @param message 此次重設的可見原因。
-    /// @return 無回傳值；有進行中的輪次時撤回 Bot。
+    ///
+    /// # 參數
+    ///
+    /// - `message` 此次重設的可見原因。
+    ///
+    /// 有進行中的輪次時撤回 Bot。
     pub(crate) async fn reset_for_lobby(&self, message: &str) {
         let bot_ids = {
             let mut state = self.state.lock().await;
@@ -192,15 +208,22 @@ impl MatchmakingSession {
     }
 
     /// 依序取消指定 Bot 的嘗試並要求回到大廳。
-    /// @param bot_ids 需要撤回的 Bot ID。
-    /// @return 無回傳值；已離線的通道錯誤忽略。
+    ///
+    /// # 參數
+    ///
+    /// - `bot_ids` 需要撤回的 Bot ID。
+    ///
+    /// 已離線的通道錯誤忽略。
     pub(crate) async fn withdraw_bots(&self, bot_ids: &[String]) {
         for bot_id in bot_ids {
             let _ = self
-                .bots
+                .effects
                 .command(bot_id, BotCommand::CancelMatchAttempt)
                 .await;
-            let _ = self.bots.command(bot_id, BotCommand::ReturnToLobby).await;
+            let _ = self
+                .effects
+                .command(bot_id, BotCommand::ReturnToLobby)
+                .await;
         }
     }
 }

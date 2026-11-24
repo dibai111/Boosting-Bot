@@ -46,6 +46,7 @@ https://www.gnu.org/licenses/agpl-3.0.html
   $: progressRatio = Math.min(1, Math.max(0, snapshot.matched_bots / progressMax));
   $: visibleBots = Math.min(Math.max(snapshot.bots.length, 1), OVERLAY_MAX_VISIBLE_BOTS);
   $: designHeight = OVERLAY_BASE_HEIGHT + visibleBots * OVERLAY_BOT_HEIGHT;
+  // 原生視窗使用基準 DPI 的實體尺寸，WebView 依目前 DPI 還原畫面比例。
   $: designScale = OVERLAY_REFERENCE_SCALE / devicePixelRatio;
 
   onMount(() => {

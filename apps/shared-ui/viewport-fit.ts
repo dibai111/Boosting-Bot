@@ -12,7 +12,7 @@
  */
 
 /** 按目前可見範圍縮放固定畫布，並監聽視窗與 visualViewport 的尺寸變化。 */
-import { fitWindowToWorkArea, type WindowDimensions } from "./window-fit";
+import { fitWindowToWorkArea, type WindowDimensions } from "./window-fit.ts";
 
 function smallestPositive(values: Array<number | undefined>): number {
   const positive = values.filter(
@@ -51,28 +51,23 @@ export function canvasScaleForCurrentViewport(designSize: WindowDimensions): num
 }
 
 /**
- * 立即同步畫布縮放並監聽視窗尺寸改變。
- * @param designSize 固定畫布的設計尺寸。
- * @param applyScale 接收新縮放值的回呼。
+ * 立即更新版面，並訂閱視窗與可見區域後續的尺寸變化。
+ * @param update 讀取當前尺寸並更新版面的回呼。
  * @return 解除所有 resize 監聽的清理函式。
  */
-export function watchCanvasScale(
-  designSize: WindowDimensions,
-  applyScale: (scale: number) => void,
-): () => void {
-  const update = () => applyScale(canvasScaleForCurrentViewport(designSize));
+export function watchViewportResize(update: () => void): () => void {
+  const visualViewport = window.visualViewport;
   update();
   window.addEventListener("resize", update);
-  window.visualViewport?.addEventListener("resize", update);
+  visualViewport?.addEventListener("resize", update);
   return () => {
     window.removeEventListener("resize", update);
-    window.visualViewport?.removeEventListener("resize", update);
+    visualViewport?.removeEventListener("resize", update);
   };
 }
 
-/** 等待兩次繪製機會，讓原生視窗調整後的 WebView 尺寸先完成更新。 */
 /**
- * 等待兩個 animation frame，讓 WebView 尺寸完成更新。
+ * 等待兩次繪製機會，讓原生視窗調整後的 WebView 尺寸先更新。
  * @return 版面穩定等待的 Promise。
  */
 export async function waitForViewportLayout(): Promise<void> {

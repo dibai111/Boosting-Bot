@@ -70,7 +70,10 @@ impl Default for NickRules {
 
 impl NickRules {
     /// 修整規則字串、限制清單數量及長度範圍。
-    /// @return 可供狀態機使用的規則。
+    ///
+    /// # 回傳
+    ///
+    /// 可供狀態機使用的規則。
     pub(super) fn normalized(mut self) -> Self {
         self.exact_length = normalize_length(self.exact_length);
         self.min_length = normalize_length(self.min_length);
@@ -90,9 +93,15 @@ pub(super) struct NickDecision {
 }
 
 /// 先檢查優先規則，再依長度、字元與文字條件判斷候選。
-/// @param nick 待評估名稱。
-/// @param rules 目前設定的篩選規則。
-/// @return 接受結果及具體原因；保留優先規則短路語意。
+///
+/// # 參數
+///
+/// - `nick` 待評估名稱。
+/// - `rules` 目前設定的篩選規則。
+///
+/// # 回傳
+///
+/// 接受結果及具體原因；保留優先規則短路語意。
 pub(super) fn evaluate_nick(nick: &str, rules: &NickRules) -> NickDecision {
     let normalized = if rules.case_sensitive {
         nick.to_owned()

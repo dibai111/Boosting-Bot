@@ -26,12 +26,18 @@ struct WindowBounds {
 
 #[tauri::command]
 /// 驗證主視窗及正尺寸後同步調整原生視窗與 WebView。
-/// @param window 提出要求的主視窗。
-/// @param x 實體像素左座標。
-/// @param y 實體像素上座標。
-/// @param width 實體像素寬度。
-/// @param height 實體像素高度。
-/// @return 視窗與 WebView 更新結果。
+///
+/// # 參數
+///
+/// - `window` 提出要求的主視窗。
+/// - `x` 實體像素左座標。
+/// - `y` 實體像素上座標。
+/// - `width` 實體像素寬度。
+/// - `height` 實體像素高度。
+///
+/// # 回傳
+///
+/// 視窗與 WebView 更新結果。
 pub(crate) async fn set_main_window_layout(
     window: tauri::WebviewWindow,
     x: i32,

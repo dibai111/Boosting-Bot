@@ -2388,12 +2388,6 @@ nav .sidebar-nav-option.selected {
   border-color: rgba(56, 157, 246, 0.42);
   background: rgba(224, 241, 255, 0.7);
 }
-.session-toolbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-}
 .page-section-heading {
   min-height: 54px;
   padding-block: 8px;
@@ -3418,9 +3412,6 @@ html[data-theme="dark"] nav button.active {
 }
 html[data-theme="dark"] .sidebar-nav-list-inner {
   background: rgba(9, 12, 10, 0.38);
-}
-html[data-theme="dark"] .sidebar-nav-option.selected {
-  background: rgba(192, 132, 252, 0.16);
 }
 html[data-theme="dark"] .sidebar-nav-option small {
   color: #78837c;

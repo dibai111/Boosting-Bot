@@ -1,3 +1,16 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 baibai and Botting contributors
+ *
+ * Botting is free software: you can redistribute it and/or modify it under
+ * the GNU Affero General Public License version 3, as published by the
+ * Free Software Foundation. This program comes WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ * PARTICULAR PURPOSE. See the LICENSE file for the complete terms.
+ * Copyleft: covered modifications must retain these license obligations.
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+
 // 驗證停止失敗、事件交錯及刪除帳號後的前端狀態，避免 UI 與實際 Bot 脫節。
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -20,7 +33,7 @@ function setup(stopBot: (id: string) => Promise<void>) {
     phases: { [account.id]: "online" },
     activeMode: "idle",
     stoppingBotIds: new Set(),
-    matchmaking: { phase: "idle", required_matches: 0, matched_bots: 0, bots: [] },
+    matchmaking: { revision: 0, phase: "idle", required_matches: 0, matched_bots: 0, bots: [] },
     matchmakingBusy: false,
     overlayVisible: false,
     selectedSessionBotId: account.id,
@@ -29,13 +42,17 @@ function setup(stopBot: (id: string) => Promise<void>) {
   };
   const errors: string[] = [];
   const feature = createBotFeature({
+    hideOverlay: async () => {},
+    applyMatchmakingSnapshot: (snapshot) => {
+      state = { ...state, matchmaking: snapshot };
+      return true;
+    },
     api: {
       startBot: async () => undefined,
       stopBot,
       deleteAccounts: async () => 1,
       updateServer: async () => undefined,
       stopMatchmaking: async () => state.matchmaking,
-      hideMatchmakingOverlay: async () => undefined,
     },
     getState: () => state,
     patchState: (patch) => {

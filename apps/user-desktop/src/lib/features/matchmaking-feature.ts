@@ -12,9 +12,15 @@
  */
 
 /** 管理配對啟停、設定及浮動視窗；後端快照是實際配對進度的依據。 */
+import type { createOverlayFeature } from "./overlay.ts";
 import type { UserApi } from "../adapters/api";
-import { favoriteModeStorageKey, modeOptionsForGame } from "./matchmaking";
-import { matchmakingTransitionLogs } from "../log/matchmaking-log";
+import type { MessageKey } from "../i18n";
+import {
+  favoriteModeStorageKey,
+  modeOptionsForGame,
+  gameKindForMode,
+} from "./matchmaking-options.ts";
+import { matchmakingTransitionLogs } from "../log/matchmaking-log.ts";
 import type {
   Account,
   BotPhase,
@@ -42,20 +48,14 @@ export interface MatchmakingFeatureState {
 }
 
 export interface MatchmakingFeatureDependencies {
-  api: Pick<
-    UserApi,
-    | "startMatchmaking"
-    | "stopMatchmaking"
-    | "showMatchmakingOverlay"
-    | "toggleMatchmakingOverlay"
-    | "hideMatchmakingOverlay"
-  >;
+  api: Pick<UserApi, "startMatchmaking" | "stopMatchmaking">;
+  overlay: Pick<ReturnType<typeof createOverlayFeature>, "show" | "hide" | "toggle">;
   getState: () => MatchmakingFeatureState;
   patchState: (patch: Partial<MatchmakingFeatureState>) => void;
   addLog: (message: string, botId?: string | null, level?: SessionLogEntry["level"]) => void;
-  savePreference: (key: string, value: string) => void;
+  savePreferences: (patch: Record<string, string>) => Promise<void>;
   showToast: (message: string, kind: "success" | "error") => void;
-  translate: (key: string) => string;
+  translate: (key: MessageKey) => string;
 }
 
 /**
@@ -64,24 +64,37 @@ export interface MatchmakingFeatureDependencies {
  * @return 配對功能介面。
  */
 export function createMatchmakingFeature(deps: MatchmakingFeatureDependencies) {
+  /** 更新同一份配對草稿；按鈕與快捷鍵都讀取此狀態。 */
+  function updateInput(
+    patch: Partial<Pick<MatchmakingFeatureState, "requiredMatches" | "matchLogPath">>,
+  ): void {
+    if (!isMatchActive(deps.getState())) deps.patchState(patch);
+  }
+
   function toggleFavorite(value: string): void {
     const next = new Set(deps.getState().favoriteMatchModes);
     if (next.has(value)) next.delete(value);
     else next.add(value);
     deps.patchState({ favoriteMatchModes: next });
-    deps.savePreference(favoriteModeStorageKey, JSON.stringify([...next]));
+    void deps
+      .savePreferences({ [favoriteModeStorageKey]: JSON.stringify([...next]) })
+      .catch((error) => deps.showToast(String(error), "error"));
   }
 
   function togglePresenceVerification(): void {
     const next = !deps.getState().verifyPresence;
     deps.patchState({ verifyPresence: next });
-    deps.savePreference("botting-verify-presence", String(next));
+    void deps
+      .savePreferences({ "botting-verify-presence": String(next) })
+      .catch((error) => deps.showToast(String(error), "error"));
   }
 
   function toggleDuelPitchVerification(): void {
     const next = !deps.getState().verifyDuelPitch;
     deps.patchState({ verifyDuelPitch: next });
-    deps.savePreference("botting-verify-duel-pitch", String(next));
+    void deps
+      .savePreferences({ "botting-verify-duel-pitch": String(next) })
+      .catch((error) => deps.showToast(String(error), "error"));
   }
 
   function selectMatchGame(game: GameKind): void {
@@ -102,21 +115,33 @@ export function createMatchmakingFeature(deps: MatchmakingFeatureDependencies) {
     if (option) deps.patchState({ matchMode: option.value });
   }
 
+  /** 同步初始或後續快照與所屬遊戲，不產生初始載入日誌。 */
+  function applySnapshot(next: MatchmakingSnapshot): boolean {
+    if (next.revision <= deps.getState().matchmaking.revision) return false;
+    deps.patchState({
+      matchmaking: next,
+      ...(next.mode && next.phase !== "idle"
+        ? { matchMode: next.mode, matchGame: gameKindForMode(next.mode) }
+        : {}),
+    });
+    return true;
+  }
+
   /**
    * 比較相鄰快照，更新進度並記錄有意義的轉換。
    * @param next 後端提供的新快照。
-   * @return 無回傳值。
+   * @return 是否接受這份新快照。
    */
-  function handleMatchmakingState(next: MatchmakingSnapshot): void {
+  function handleMatchmakingState(next: MatchmakingSnapshot): boolean {
     const previous = deps.getState().matchmaking;
-    const transitionLogs = matchmakingTransitionLogs(previous, next);
-    deps.patchState({ matchmaking: next });
-    for (const entry of transitionLogs) {
+    if (!applySnapshot(next)) return false;
+    for (const entry of matchmakingTransitionLogs(previous, next)) {
       deps.addLog(entry.message, entry.botId, entry.level);
     }
     if (previous.phase !== "idle" && next.phase === "idle") {
-      void deps.api.hideMatchmakingOverlay();
+      void deps.overlay.hide().catch((error) => deps.showToast(String(error), "error"));
     }
+    return true;
   }
 
   /**
@@ -125,6 +150,7 @@ export function createMatchmakingFeature(deps: MatchmakingFeatureDependencies) {
    */
   async function start(): Promise<void> {
     const state = deps.getState();
+    if (state.matchmakingBusy) return;
     const botIds = state.accounts
       .filter(
         (account) => state.selectedBotIds.has(account.id) && state.phases[account.id] === "online",
@@ -142,10 +168,12 @@ export function createMatchmakingFeature(deps: MatchmakingFeatureDependencies) {
     deps.patchState({ matchmakingBusy: true });
     try {
       const logPath = state.matchLogPath.trim();
-      deps.savePreference("botting-match-mode", state.matchMode);
-      deps.savePreference("botting-player-log-path", logPath);
-      deps.savePreference("botting-verify-presence", String(state.verifyPresence));
-      deps.savePreference("botting-verify-duel-pitch", String(state.verifyDuelPitch));
+      await deps.savePreferences({
+        "botting-match-mode": state.matchMode,
+        "botting-player-log-path": logPath,
+        "botting-verify-presence": String(state.verifyPresence),
+        "botting-verify-duel-pitch": String(state.verifyDuelPitch),
+      });
       const matchmaking = await deps.api.startMatchmaking({
         mode: state.matchMode,
         bot_ids: botIds,
@@ -154,10 +182,12 @@ export function createMatchmakingFeature(deps: MatchmakingFeatureDependencies) {
         required_matches: Math.min(Math.max(1, state.requiredMatches), botIds.length),
         log_path: logPath,
       });
-      deps.patchState({ matchmaking });
+      applySnapshot(matchmaking);
       deps.addLog(`matchmaking started with ${botIds.length} bots`);
-      await deps.api.showMatchmakingOverlay(matchmaking.bots.length);
-      deps.patchState({ overlayVisible: true });
+      const current = deps.getState();
+      if (current.matchmaking.session_id === matchmaking.session_id && isMatchActive(current)) {
+        await deps.overlay.show(current.matchmaking.bots.length);
+      }
     } catch (error) {
       deps.showToast(String(error), "error");
     } finally {
@@ -170,13 +200,15 @@ export function createMatchmakingFeature(deps: MatchmakingFeatureDependencies) {
    * @return 停止流程的 Promise；錯誤透過通知顯示。
    */
   async function stop(): Promise<void> {
+    if (deps.getState().matchmakingBusy) return;
     deps.patchState({ matchmakingBusy: true });
     try {
       const matchmaking = await deps.api.stopMatchmaking();
-      deps.patchState({ matchmaking });
+      applySnapshot(matchmaking);
       deps.addLog("matchmaking stopped");
-      await deps.api.hideMatchmakingOverlay();
-      deps.patchState({ overlayVisible: false });
+      if (!isMatchActive(deps.getState())) {
+        await deps.overlay.hide();
+      }
     } catch (error) {
       deps.showToast(String(error), "error");
     } finally {
@@ -193,25 +225,20 @@ export function createMatchmakingFeature(deps: MatchmakingFeatureDependencies) {
     const path = deps.getState().matchLogPath.trim();
     if (!path) return;
     deps.patchState({ matchLogPath: path, logPathDialogOpen: false });
-    deps.savePreference("botting-player-log-path", path);
     void start();
   }
 
   async function toggleOverlay(): Promise<void> {
     try {
       const state = deps.getState();
-      const overlayVisible = await deps.api.toggleMatchmakingOverlay(
-        state.matchmaking.bots.length || state.selectedBotIds.size,
-      );
-      deps.patchState({ overlayVisible });
+      await deps.overlay.toggle(state.matchmaking.bots.length || state.selectedBotIds.size);
     } catch (error) {
       deps.showToast(String(error), "error");
     }
   }
 
   async function hideOverlay(): Promise<void> {
-    await deps.api.hideMatchmakingOverlay();
-    deps.patchState({ overlayVisible: false });
+    await deps.overlay.hide();
   }
 
   /**
@@ -227,6 +254,8 @@ export function createMatchmakingFeature(deps: MatchmakingFeatureDependencies) {
   }
 
   return {
+    applySnapshot,
+    updateInput,
     continueWithLogPath,
     handleMatchmakingState,
     handleShortcut,

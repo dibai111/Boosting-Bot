@@ -14,9 +14,15 @@
 //! 比對加入訊息中的真實名稱，名稱缺失時不視為配對成功。
 
 /// 比對預期真實名稱與加入日誌中的名稱。
-/// @param expected 計畫保存的名稱；缺失時不接受。
-/// @param observed 日誌中的玩家名稱。
-/// @return 名稱不分大小寫相符時為 true。
+///
+/// # 參數
+///
+/// - `expected` 計畫保存的名稱；缺失時不接受。
+/// - `observed` 日誌中的玩家名稱。
+///
+/// # 回傳
+///
+/// 名稱不分大小寫相符時為 true。
 pub(crate) fn matches(expected: Option<&str>, observed: &str) -> bool {
     expected.is_some_and(|name| name.eq_ignore_ascii_case(observed))
 }

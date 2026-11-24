@@ -19,19 +19,17 @@ mod matchmaking;
 mod nick;
 mod settings;
 mod system;
+mod work_mode;
 
 use crate::{
     app_state::CommandResult,
-    bot_runtime::{BotEvent, BotEventBus, BotRuntime, RuntimeMode},
+    bot_runtime::{BotEvent, BotEventBus, BotRuntime, RuntimeMode, RuntimeModeSnapshot},
     matchmaking::{MatchmakingDiagnostic, MatchmakingSession},
 };
 use local_store::Store;
-use std::{
-    collections::HashSet,
-    sync::{Arc, Mutex as StdMutex},
-};
+use std::sync::{Arc, Mutex as StdMutex};
 use tokio::{
-    sync::{broadcast, watch, Mutex},
+    sync::{broadcast, mpsc, watch, Mutex},
     task,
 };
 
@@ -40,48 +38,60 @@ pub(crate) use nick::StartNickRollerInput;
 /// 協調儲存、登入、Bot 與互斥工作模式的應用服務。
 pub(crate) struct UserRuntime {
     store: Arc<StdMutex<Store>>,
-    pub(crate) bots: Arc<BotRuntime>,
-    pub(crate) events: BotEventBus,
+    bots: Arc<BotRuntime>,
+    events: BotEventBus,
     http_client: reqwest::Client,
     matchmaking: Arc<MatchmakingSession>,
-    active_mode: Mutex<RuntimeMode>,
-    nick_bot_ids: Mutex<HashSet<String>>,
+    work: Mutex<work_mode::WorkState>,
 }
 
 impl UserRuntime {
     /// 組合應用依賴，初始工作模式為 Idle。
-    /// @param store 目前使用者的本機儲存。
-    /// @param bots 共用 Bot runtime。
-    /// @param events Bot 事件廣播匯流排。
-    /// @param http_client 登入流程共用的 HTTP client。
-    /// @param matchmaking 多 Bot 配對協調器。
-    /// @return 持有所有應用服務的 runtime。
+    ///
+    /// # 參數
+    ///
+    /// - `store` 目前使用者的本機儲存。
+    /// - `bots` 共用 Bot runtime。
+    /// - `events` Bot 業務輸入與處理後通知佇列。
+    /// - `http_client` 登入流程共用的 HTTP client。
+    /// - `matchmaking` 多 Bot 配對協調器。
+    ///
+    /// # 回傳
+    ///
+    /// 已啟動唯一業務消費任務的共用 runtime。
     pub(crate) fn new(
         store: Store,
         bots: Arc<BotRuntime>,
         events: BotEventBus,
         http_client: reqwest::Client,
         matchmaking: Arc<MatchmakingSession>,
-    ) -> Self {
-        Self {
+    ) -> Arc<Self> {
+        let runtime = Arc::new(Self {
             store: Arc::new(StdMutex::new(store)),
             bots,
             events,
             http_client,
             matchmaking,
-            active_mode: Mutex::new(RuntimeMode::Idle),
-            nick_bot_ids: Mutex::new(HashSet::new()),
-        }
+            work: Mutex::new(work_mode::WorkState::new()),
+        });
+        runtime.start_event_processing();
+        runtime
     }
 
     /// 訂閱之後發布的 Bot 事件。
-    /// @return 有界廣播接收端；落後時需處理 Lagged。
-    pub(crate) fn subscribe_bot_events(&self) -> broadcast::Receiver<BotEvent> {
-        self.events.subscribe()
+    ///
+    /// # 回傳
+    ///
+    /// 唯一桌面通知接收端，保留完整處理順序。
+    pub(crate) fn take_bot_notifications(&self) -> mpsc::UnboundedReceiver<BotEvent> {
+        self.events.take_notifications()
     }
 
     /// 訂閱目前與後續配對快照。
-    /// @return 保留最新配對狀態的 watch 接收端。
+    ///
+    /// # 回傳
+    ///
+    /// 保留最新配對狀態的 watch 接收端。
     pub(crate) fn subscribe_matchmaking(
         &self,
     ) -> watch::Receiver<crate::matchmaking::MatchmakingSnapshot> {
@@ -89,17 +99,45 @@ impl UserRuntime {
     }
 
     /// 訂閱配對診斷事件。
-    /// @return 有界診斷廣播接收端。
+    ///
+    /// # 回傳
+    ///
+    /// 有界診斷廣播接收端。
     pub(crate) fn subscribe_matchmaking_diagnostics(
         &self,
     ) -> broadcast::Receiver<MatchmakingDiagnostic> {
         self.matchmaking.subscribe_diagnostics()
     }
 
-    /// 同步玩家資料並將事件交給配對與工作模式追蹤。
-    /// @param event 目前連線 generation 所發布的 Bot 事件。
-    /// @return 無回傳值；儲存失敗會發布錯誤事件。
-    pub(crate) async fn handle_bot_event(&self, event: &BotEvent) {
+    /// 啟動唯一業務事件消費流程，弱參照避免背景任務延長 runtime 壽命。
+    fn start_event_processing(self: &Arc<Self>) {
+        let mut events = self.events.take_business_events();
+        let runtime = Arc::downgrade(self);
+        tauri::async_runtime::spawn(async move {
+            while let Some(event) = events.recv().await {
+                let Some(runtime) = runtime.upgrade() else {
+                    break;
+                };
+                if runtime.handle_bot_event(&event).await {
+                    runtime.events.notify(event);
+                }
+            }
+        });
+    }
+
+    /// 在生命週期鎖內處理業務事件，過期 Nick 事件不轉送。
+    async fn handle_bot_event(&self, event: &BotEvent) -> bool {
+        let mut work = self.work.lock().await;
+        let nick_run = match event {
+            BotEvent::NickRollerState { run_id, .. }
+            | BotEvent::NickCandidate { run_id, .. }
+            | BotEvent::NickVerification { run_id, .. }
+            | BotEvent::NickAttention { run_id, .. } => Some(*run_id),
+            _ => None,
+        };
+        if nick_run.is_some_and(|id| !work.accepts_nick(id)) {
+            return false;
+        }
         if let BotEvent::Profile {
             bot_id,
             username,
@@ -113,7 +151,7 @@ impl UserRuntime {
                 .with_store(move |store| {
                     store
                         .update_profile(&stored_bot_id, &username, uuid.as_deref())
-                        .map_err(|error| error.to_string())
+                        .map_err(|e| e.to_string())
                 })
                 .await
             {
@@ -124,120 +162,65 @@ impl UserRuntime {
                 });
             }
         }
-        let previous_matchmaking_phase = self.matchmaking.phase().await;
         self.matchmaking.handle_bot_event(event).await;
-        let matching_done = if is_matchmaking_lifecycle_event(event)
-            && !matches!(
-                previous_matchmaking_phase,
-                crate::matchmaking::MatchmakingPhase::Idle
-                    | crate::matchmaking::MatchmakingPhase::Failed
-            ) {
-            let mode = *self.active_mode.lock().await;
-            mode == RuntimeMode::Matching
-                && matches!(
-                    self.matchmaking.phase().await,
-                    crate::matchmaking::MatchmakingPhase::Idle
-                        | crate::matchmaking::MatchmakingPhase::Failed
-                )
-        } else {
-            false
-        };
-        if matching_done {
-            self.leave_mode(RuntimeMode::Matching).await;
-        }
-        if let BotEvent::NickRollerState { bot_id, phase, .. } = event {
+        if let BotEvent::NickRollerState {
+            run_id,
+            bot_id,
+            phase,
+            ..
+        } = event
+        {
             if phase.is_terminal() {
-                let should_leave = {
-                    let mut bot_ids = self.nick_bot_ids.lock().await;
-                    bot_ids.remove(bot_id);
-                    bot_ids.is_empty()
-                };
-                if should_leave {
-                    self.leave_mode(RuntimeMode::NickRoller).await;
-                }
+                work.complete_nick_bot(*run_id, bot_id, &self.events);
             }
         }
+        self.reconcile_work(&mut work).await;
+        true
     }
 
-    /// 停止配對、Nick 篩選及所有 Bot 工作階段。
-    /// @return 所有停止流程返回後完成。
+    /// 拒絕後續工作並在同一生命週期鎖內完成所有停止操作。
     pub(crate) async fn shutdown(&self) {
+        let mut work = self.work.lock().await;
+        let nick = work.begin_shutdown(&self.events);
         self.matchmaking.stop().await;
-        self.leave_mode(RuntimeMode::Matching).await;
-        let _ = self.stop_nick_roller().await;
+        if let Some((run_id, bot_ids)) = nick {
+            for bot_id in bot_ids {
+                let _ = self
+                    .bots
+                    .command(
+                        &bot_id,
+                        crate::bot_runtime::BotCommand::StopNickRoller { run_id },
+                    )
+                    .await;
+            }
+        }
         self.bots.shutdown().await;
     }
 
-    /// 先對照實際狀態，再取得目前工作模式。
-    /// @return Idle、Matching 或 NickRoller。
-    pub(crate) async fn active_mode(&self) -> RuntimeMode {
-        self.reconcile_active_mode().await;
-        *self.active_mode.lock().await
+    /// 取得完整啟停操作之後的工作模式。
+    pub(crate) async fn active_mode(&self) -> RuntimeModeSnapshot {
+        let mut work = self.work.lock().await;
+        self.reconcile_work(&mut work).await;
+        work.snapshot()
     }
 
-    /// 在 Idle 時宣告工作模式並發布模式事件。
-    /// @param requested 要進入的工作模式。
-    /// @return 成功或既有模式衝突錯誤；實際啟動由呼叫端完成。
-    pub(crate) async fn enter_mode(&self, requested: RuntimeMode) -> CommandResult<()> {
-        let mut mode = self.active_mode.lock().await;
-        if *mode != RuntimeMode::Idle {
-            return Err(mode_conflict_message(*mode));
-        }
-        *mode = requested;
-        drop(mode);
-        self.events
-            .publish(BotEvent::RuntimeMode { mode: requested });
-        Ok(())
-    }
-
-    /// 只退出指定的目前模式，避免清除另一種模式。
-    /// @param mode_to_leave 預期要結束的模式。
-    /// @return 無回傳值；模式有變更才發布事件。
-    pub(crate) async fn leave_mode(&self, mode_to_leave: RuntimeMode) {
-        let changed = {
-            let mut mode = self.active_mode.lock().await;
-            if *mode == mode_to_leave {
-                *mode = RuntimeMode::Idle;
-                true
-            } else {
-                false
-            }
-        };
-        if changed {
-            self.events.publish(BotEvent::RuntimeMode {
-                mode: RuntimeMode::Idle,
-            });
-        }
-    }
-
-    /// 對照配對階段與 Nick 追蹤集合，釋放已結束模式。
-    /// @return 無回傳值；必要時將模式改為 Idle。
-    pub(crate) async fn reconcile_active_mode(&self) {
-        let mode = *self.active_mode.lock().await;
-        match mode {
-            RuntimeMode::Matching => {
-                let phase = self.matchmaking.phase().await;
-                if matches!(
-                    phase,
-                    crate::matchmaking::MatchmakingPhase::Idle
-                        | crate::matchmaking::MatchmakingPhase::Failed
-                ) {
-                    self.leave_mode(RuntimeMode::Matching).await;
-                }
-            }
-            RuntimeMode::NickRoller => {
-                if self.nick_bot_ids.lock().await.is_empty() {
-                    self.leave_mode(RuntimeMode::NickRoller).await;
-                }
-            }
-            RuntimeMode::Idle => {}
+    /// 配對結束時保留結果，但停止追蹤，避免日誌重啟已釋放的工作模式。
+    async fn reconcile_work(&self, work: &mut work_mode::WorkState) {
+        if work.mode() == RuntimeMode::Matching && self.matchmaking.finish_if_terminal().await {
+            work.finish_matching(&self.events);
         }
     }
 
     // 鎖住整次讀改寫，並移到 blocking worker，避免 Registry 操作阻塞非同步執行緒。
     /// 在 blocking worker 內持鎖執行完整儲存操作。
-    /// @param operation 讀取或更新 Store 的閉包，須擁有跨執行緒所需資料。
-    /// @return 閉包結果；鎖中毒或 worker 失敗時回傳錯誤。
+    ///
+    /// # 參數
+    ///
+    /// - `operation` 讀取或更新 Store 的閉包，須擁有跨執行緒所需資料。
+    ///
+    /// # 回傳
+    ///
+    /// 閉包結果；鎖中毒或 worker 失敗時回傳錯誤。
     async fn with_store<T, F>(&self, operation: F) -> CommandResult<T>
     where
         T: Send + 'static,
@@ -252,35 +235,5 @@ impl UserRuntime {
         })
         .await
         .map_err(|error| format!("local store task failed: {error}"))?
-    }
-}
-
-fn is_matchmaking_lifecycle_event(event: &BotEvent) -> bool {
-    matches!(
-        event,
-        BotEvent::MatchAttemptResult { .. }
-            | BotEvent::MatchAttemptFailed { .. }
-            | BotEvent::MatchRetryReady { .. }
-            | BotEvent::MatchRetryPreparationFailed { .. }
-            | BotEvent::QueueProgress { .. }
-            | BotEvent::DuelPitchObserved { .. }
-            | BotEvent::BotGameState { .. }
-            | BotEvent::Status {
-                phase: crate::bot_runtime::BotPhase::Offline,
-                ..
-            }
-            | BotEvent::Error { .. }
-    )
-}
-
-fn mode_conflict_message(mode: RuntimeMode) -> String {
-    match mode {
-        RuntimeMode::Matching => {
-            "Matching is currently active; stop it before starting Nick Roller".to_owned()
-        }
-        RuntimeMode::NickRoller => {
-            "Nick Roller is currently active; stop it before starting Matching".to_owned()
-        }
-        RuntimeMode::Idle => "another user operation is currently active".to_owned(),
     }
 }

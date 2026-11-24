@@ -45,9 +45,15 @@ struct HookState {
 static STATE: OnceLock<Mutex<HookState>> = OnceLock::new();
 
 /// 建立低階鍵盤 hook，等待安裝結果後才返回。
-/// @param shortcuts 初始快捷鍵規格。
-/// @param sender 發送操作名稱的有界同步通道。
-/// @return 安裝結果；重複啟動會回傳錯誤。
+///
+/// # 參數
+///
+/// - `shortcuts` 初始快捷鍵規格。
+/// - `sender` 發送操作名稱的有界同步通道。
+///
+/// # 回傳
+///
+/// 安裝結果；重複啟動會回傳錯誤。
 pub(super) fn start(
     shortcuts: ShortcutPair,
     sender: mpsc::SyncSender<&'static str>,
@@ -76,8 +82,14 @@ pub(super) fn start(
 }
 
 /// 持鎖更新快捷鍵並清除長按追蹤。
-/// @param shortcuts 新的配對快捷鍵組。
-/// @return 更新結果；hook 未啟動或鎖失敗時為 Err。
+///
+/// # 參數
+///
+/// - `shortcuts` 新的配對快捷鍵組。
+///
+/// # 回傳
+///
+/// 更新結果；hook 未啟動或鎖失敗時為 Err。
 pub(super) fn configure(shortcuts: ShortcutPair) -> Result<(), ()> {
     let mut state = STATE.get().ok_or(())?.lock().map_err(|_| ())?;
     state.shortcuts = shortcuts;

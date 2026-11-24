@@ -29,15 +29,24 @@ use uuid::Uuid;
 
 impl UserRuntime {
     /// 取得帳號清單，並從舊版 access token 補出缺少的到期時間。
-    /// @return 帳號快照或儲存錯誤。
+    ///
+    /// # 回傳
+    ///
+    /// 帳號快照或儲存錯誤。
     pub(crate) async fn list_accounts(&self) -> CommandResult<Vec<AccountRecord>> {
         self.with_store(|store| store.list_accounts().map_err(|error| error.to_string()))
             .await
     }
 
     /// 依登入方式驗證輸入、交換工作階段並保存帳號。
-    /// @param input 未信任的帳號輸入；Microsoft 流程會發布裝置代碼。
-    /// @return 已驗證且保存的帳號，或登入／儲存錯誤。
+    ///
+    /// # 參數
+    ///
+    /// - `input` 未信任的帳號輸入；Microsoft 流程會發布裝置代碼。
+    ///
+    /// # 回傳
+    ///
+    /// 已驗證且保存的帳號，或登入／儲存錯誤。
     pub(crate) async fn add_account(
         &self,
         mut input: CreateAccountInput,
@@ -138,8 +147,14 @@ impl UserRuntime {
     }
 
     /// 先停止並移除各 Bot，再刪除本機帳號。
-    /// @param ids 待移除的本機帳號 ID。
-    /// @return 實際刪除筆數；停止失敗時不繼續刪除儲存資料。
+    ///
+    /// # 參數
+    ///
+    /// - `ids` 待移除的本機帳號 ID。
+    ///
+    /// # 回傳
+    ///
+    /// 實際刪除筆數；停止失敗時不繼續刪除儲存資料。
     pub(crate) async fn delete_accounts(&self, ids: Vec<String>) -> CommandResult<usize> {
         for id in &ids {
             validate_length(id, "account id", MAX_BOT_ID_BYTES)
@@ -161,9 +176,15 @@ impl UserRuntime {
     }
 
     /// 驗證地址長度與非空條件後更新儲存。
-    /// @param id 本機帳號 ID。
-    /// @param server_address 新的伺服器地址。
-    /// @return 驗證或儲存結果。
+    ///
+    /// # 參數
+    ///
+    /// - `id` 本機帳號 ID。
+    /// - `server_address` 新的伺服器地址。
+    ///
+    /// # 回傳
+    ///
+    /// 驗證或儲存結果。
     pub(crate) async fn update_server_address(
         &self,
         id: String,

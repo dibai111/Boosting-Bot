@@ -21,7 +21,7 @@ use crate::{
 use anyhow::{bail, Result};
 use std::collections::HashMap;
 
-/// 將 wire request 與已儲存帳號快照編譯成單次 matchmaking 可執行的不可變資料。
+/// 將前端請求與已儲存的帳號快照轉成單次配對使用的固定計畫。
 #[derive(Debug, Clone)]
 pub(crate) struct MatchmakingPlan {
     mode: GameMode,
@@ -40,9 +40,15 @@ struct PlannedBot {
 
 impl MatchmakingPlan {
     /// 以儲存帳號快照建立計畫，正規化 ID 並驗證選擇與數量。
-    /// @param input 配對請求。
-    /// @param accounts 本機帳號 ID 與已驗證玩家名稱的序列。
-    /// @return 不可變計畫；帳號缺失或輸入無效時回傳錯誤。
+    ///
+    /// # 參數
+    ///
+    /// - `input` 配對請求。
+    /// - `accounts` 本機帳號 ID 與已驗證玩家名稱的序列。
+    ///
+    /// # 回傳
+    ///
+    /// 不可變計畫；帳號缺失或輸入無效時回傳錯誤。
     pub(crate) fn compile(
         mut input: StartMatchmakingInput,
         accounts: impl IntoIterator<Item = (String, String)>,
@@ -79,20 +85,32 @@ impl MatchmakingPlan {
     }
 
     /// 取得本計畫的遊戲模式。
-    /// @return GameMode。
+    ///
+    /// # 回傳
+    ///
+    /// GameMode。
     pub(crate) const fn mode(&self) -> GameMode {
         self.mode
     }
 
     /// 依計畫順序列出參與 Bot。
-    /// @return 借用的 Bot ID 迭代器。
+    ///
+    /// # 回傳
+    ///
+    /// 借用的 Bot ID 迭代器。
     pub(crate) fn bot_ids(&self) -> impl Iterator<Item = &str> {
         self.bots.iter().map(|bot| bot.id.as_str())
     }
 
     /// 取得建立計畫時保存的玩家名稱。
-    /// @param bot_id 本機 Bot ID。
-    /// @return 玩家名稱；未參與的 Bot 為 None。
+    ///
+    /// # 參數
+    ///
+    /// - `bot_id` 本機 Bot ID。
+    ///
+    /// # 回傳
+    ///
+    /// 玩家名稱；未參與的 Bot 為 None。
     pub(crate) fn username(&self, bot_id: &str) -> Option<&str> {
         self.bots
             .iter()
@@ -101,25 +119,37 @@ impl MatchmakingPlan {
     }
 
     /// 只對啟用聊天驗證的 BedWars 模式開啟在場確認。
-    /// @return 是否需要聊天驗證。
+    ///
+    /// # 回傳
+    ///
+    /// 是否需要聊天驗證。
     pub(crate) fn requires_presence_verification(&self) -> bool {
         self.mode.kind() == GameKind::Bedwars && self.verify_presence
     }
 
     /// 只對啟用俯仰驗證的 Duels 模式開啟手勢確認。
-    /// @return 是否需要俯仰驗證。
+    ///
+    /// # 回傳
+    ///
+    /// 是否需要俯仰驗證。
     pub(crate) fn requires_pitch_verification(&self) -> bool {
         self.mode.kind() == GameKind::Duels && self.verify_duel_pitch
     }
 
     /// 取得本輪成功所需的最低 Bot 數。
-    /// @return 已驗證的最低數量。
+    ///
+    /// # 回傳
+    ///
+    /// 已驗證的最低數量。
     pub(crate) const fn required_matches(&self) -> usize {
         self.required_matches
     }
 
     /// 取得玩家日誌路徑。
-    /// @return 建立計畫時保存的路徑字串。
+    ///
+    /// # 回傳
+    ///
+    /// 建立計畫時保存的路徑字串。
     pub(crate) fn log_path(&self) -> &str {
         &self.log_path
     }

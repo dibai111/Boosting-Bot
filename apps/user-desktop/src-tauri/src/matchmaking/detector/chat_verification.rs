@@ -16,8 +16,14 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// 解析玩家聊天的發言者及內容，名稱僅接受 Minecraft 字元。
-/// @param line 已移除格式碼的可見聊天行。
-/// @return 玩家名稱與內容；無效格式為 None。
+///
+/// # 參數
+///
+/// - `line` 已移除格式碼的可見聊天行。
+///
+/// # 回傳
+///
+/// 玩家名稱與內容；無效格式為 None。
 pub(crate) fn parse(line: &str) -> Option<(String, String)> {
     let (speaker, message) = line.split_once(':')?;
     let username = speaker
@@ -36,15 +42,24 @@ pub(crate) fn parse(line: &str) -> Option<(String, String)> {
 }
 
 /// 以不區分大小寫的真實名稱確認發言者。
-/// @param expected_username 計畫內保存的玩家名稱。
-/// @param username 玩家日誌解析出的發言者。
-/// @return 名稱相符時為 true。
+///
+/// # 參數
+///
+/// - `expected_username` 計畫內保存的玩家名稱。
+/// - `username` 玩家日誌解析出的發言者。
+///
+/// # 回傳
+///
+/// 名稱相符時為 true。
 pub(crate) fn matches(expected_username: &str, username: &str) -> bool {
     expected_username.eq_ignore_ascii_case(username)
 }
 
 /// 從既有短句清單選取在場驗證用聊天文字。
-/// @return 短句字串；不是密碼學挑戰值。
+///
+/// # 回傳
+///
+/// 短句字串；不是密碼學挑戰值。
 pub(crate) fn random_phrase() -> String {
     const PHRASES: [&str; 100] = [
         "hi",

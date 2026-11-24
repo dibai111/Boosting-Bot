@@ -70,8 +70,14 @@ struct MinecraftLoginResponse {
 }
 
 /// 解析匯出 Cookie，交換 Xbox 身分與 Minecraft 工作階段。
-/// @param cookie_text 以 Tab 分欄的 Cookie 匯出文字。
-/// @return 玩家資料、權杖與期限；登入或格式失敗時回傳錯誤。
+///
+/// # 參數
+///
+/// - `cookie_text` 以 Tab 分欄的 Cookie 匯出文字。
+///
+/// # 回傳
+///
+/// 玩家資料、權杖與期限；登入或格式失敗時回傳錯誤。
 pub async fn exchange(cookie_text: &str) -> Result<CookieSession> {
     let cookie_header = parse_cookie_header(cookie_text)?;
     let client = Client::builder()
@@ -97,9 +103,15 @@ pub async fn exchange(cookie_text: &str) -> Result<CookieSession> {
 }
 
 /// 沿允許的 HTTPS 登入端點追蹤最多十次重新導向。
-/// @param client 停用自動重新導向的 HTTP client。
-/// @param cookies 已解析的 Cookie header。
-/// @return Minecraft Services 所需的 Xbox identity token。
+///
+/// # 參數
+///
+/// - `client` 停用自動重新導向的 HTTP client。
+/// - `cookies` 已解析的 Cookie header。
+///
+/// # 回傳
+///
+/// Minecraft Services 所需的 Xbox identity token。
 async fn request_xbox_identity_token(client: &Client, cookies: &str) -> Result<String> {
     let mut url = Url::parse(SISU_CONNECT_URL)?;
     for _ in 0..10 {
@@ -147,8 +159,14 @@ async fn request_minecraft_access_token(client: &Client, identity_token: &str) -
 }
 
 /// 從匯出文字最後兩欄取得 Cookie 名稱及值。
-/// @param cookie_text 每行最後兩欄為名稱及值的 Tab 分欄文字。
-/// @return Cookie header；沒有可用條目時回傳錯誤。
+///
+/// # 參數
+///
+/// - `cookie_text` 每行最後兩欄為名稱及值的 Tab 分欄文字。
+///
+/// # 回傳
+///
+/// Cookie header；沒有可用條目時回傳錯誤。
 fn parse_cookie_header(cookie_text: &str) -> Result<String> {
     let mut cookies = HashMap::new();
     for line in cookie_text.lines() {
@@ -173,8 +191,14 @@ fn parse_cookie_header(cookie_text: &str) -> Result<String> {
 }
 
 /// 從 SISU JSON 選取 Minecraft Services 對應的 Xbox claims。
-/// @param sisu_token Base64 編碼的 SISU token。
-/// @return XBL3.0 identity token；缺少資源或 claims 時回傳錯誤。
+///
+/// # 參數
+///
+/// - `sisu_token` Base64 編碼的 SISU token。
+///
+/// # 回傳
+///
+/// XBL3.0 identity token；缺少資源或 claims 時回傳錯誤。
 fn build_identity_token(sisu_token: &str) -> Result<String> {
     let items: Vec<SisuItem> = decode_base64_json(sisu_token)?;
     let data = items
@@ -209,8 +233,14 @@ fn url_field(url: &Url, key: &str) -> Option<String> {
 }
 
 /// 判斷重新導向是否仍位於允許的 HTTPS 登入端點。
-/// @param url 解析後的重新導向網址。
-/// @return 僅 HTTPS、443 埠且主機符合允許清單時為 true。
+///
+/// # 參數
+///
+/// - `url` 解析後的重新導向網址。
+///
+/// # 回傳
+///
+/// 僅 HTTPS、443 埠且主機符合允許清單時為 true。
 fn allowed_auth_host(url: &Url) -> bool {
     // Cookie 僅能送往允許的 HTTPS 端點，重新導向不得降級為明文傳輸。
     if url.scheme() != "https" || url.port_or_known_default() != Some(443) {

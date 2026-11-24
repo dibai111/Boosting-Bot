@@ -30,31 +30,45 @@ pub(crate) struct QueueObservation {
 }
 
 /// 更新佇列並保留是否曾經看過一人等待。
-/// @param previous 同一輪的前次觀察。
-/// @param current 目前人數。
-/// @param total 佇列容量。
-/// @return 帶累積等待標記的新觀察。
+///
+/// # 參數
+///
+/// - `previous` 同一輪的前次觀察。
+/// - `current` 目前人數。
+/// - `total` 佇列容量。
+/// - `observed_at` 由呼叫端時鐘提供的單調觀察時間。
+///
+/// # 回傳
+///
+/// 帶累積等待標記的新觀察。
 pub(crate) fn next_observation(
     previous: Option<QueueObservation>,
     current: u32,
     total: u32,
+    observed_at: Instant,
 ) -> QueueObservation {
     QueueObservation {
         current,
         total,
-        observed_at: Instant::now(),
+        observed_at,
         saw_waiting: previous.is_some_and(|value| value.saw_waiting)
             || (current == 1 && total == 2),
     }
 }
 
 /// 要求玩家曾等待，之後雙方在短時間內觀察到相同伺服器二人滿隊。
-/// @param player_server 玩家目標伺服器。
-/// @param bot_server Bot 觀察到的伺服器。
-/// @param round_started_at 本輪開始時間。
-/// @param player 玩家端佇列觀察。
-/// @param bot Bot 端佇列觀察。
-/// @return 符合本輪 Duels 佇列條件時為 true。
+///
+/// # 參數
+///
+/// - `player_server` 玩家目標伺服器。
+/// - `bot_server` Bot 觀察到的伺服器。
+/// - `round_started_at` 本輪開始時間。
+/// - `player` 玩家端佇列觀察。
+/// - `bot` Bot 端佇列觀察。
+///
+/// # 回傳
+///
+/// 符合本輪 Duels 佇列條件時為 true。
 pub(crate) fn is_candidate(
     player_server: Option<&str>,
     bot_server: Option<&str>,

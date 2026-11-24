@@ -26,8 +26,14 @@ use uuid::Uuid;
 
 impl UserRuntime {
     /// 讀取帳號、更新到期工作階段後建立 Bot 連線。
-    /// @param account_id 已保存的本機帳號 ID。
-    /// @return 啟動請求結果；實際連線進度由 Bot 事件通知。
+    ///
+    /// # 參數
+    ///
+    /// - `account_id` 已保存的本機帳號 ID。
+    ///
+    /// # 回傳
+    ///
+    /// 啟動請求結果；實際連線進度由 Bot 事件通知。
     pub(crate) async fn start_bot(&self, account_id: String) -> CommandResult<()> {
         validate_length(&account_id, "bot id", MAX_BOT_ID_BYTES)
             .map_err(|error| error.to_string())?;
@@ -63,16 +69,28 @@ impl UserRuntime {
     }
 
     /// 停止指定帳號的 Bot 工作階段。
-    /// @param id 本機帳號 ID。
-    /// @return 停止結果；未執行的 Bot 視為已停止。
+    ///
+    /// # 參數
+    ///
+    /// - `id` 本機帳號 ID。
+    ///
+    /// # 回傳
+    ///
+    /// 停止結果；未執行的 Bot 視為已停止。
     pub(crate) async fn stop_bot(&self, id: String) -> CommandResult<()> {
         validate_length(&id, "bot id", MAX_BOT_ID_BYTES).map_err(|error| error.to_string())?;
         self.bots.stop(&id).await.map_err(|error| error.to_string())
     }
 
     /// 依登入種類更新工作階段，並同步記憶體內帳號。
-    /// @param account 即將用於連線的帳號，更新成功後原地修改。
-    /// @return 工作階段可用或登入／儲存錯誤。
+    ///
+    /// # 參數
+    ///
+    /// - `account` 即將用於連線的帳號，更新成功後原地修改。
+    ///
+    /// # 回傳
+    ///
+    /// 工作階段可用或登入／儲存錯誤。
     async fn prepare_session(&self, account: &mut AccountSession) -> CommandResult<()> {
         match account.account.auth_kind {
             AuthKind::Microsoft => self.prepare_microsoft(account).await,
@@ -159,9 +177,15 @@ impl UserRuntime {
     }
 
     /// 先保存完整登入結果，再更新呼叫端帳號快照。
-    /// @param account 待同步的帳號。
-    /// @param session 已驗證的新 Microsoft 工作階段。
-    /// @return 儲存結果；寫入失敗不改動呼叫端快照。
+    ///
+    /// # 參數
+    ///
+    /// - `account` 待同步的帳號。
+    /// - `session` 已驗證的新 Microsoft 工作階段。
+    ///
+    /// # 回傳
+    ///
+    /// 儲存結果；寫入失敗不改動呼叫端快照。
     async fn save_microsoft_session(
         &self,
         account: &mut AccountSession,
@@ -196,8 +220,14 @@ impl UserRuntime {
 }
 
 /// 優先使用工作階段權杖，無工作階段時才使用帳號憑據。
-/// @param account 已完成登入準備的帳號。
-/// @return 非空 access token；缺失時回傳固定錯誤代碼。
+///
+/// # 參數
+///
+/// - `account` 已完成登入準備的帳號。
+///
+/// # 回傳
+///
+/// 非空 access token；缺失時回傳固定錯誤代碼。
 fn active_access_token(account: &AccountSession) -> CommandResult<String> {
     account
         .secrets
@@ -210,8 +240,14 @@ fn active_access_token(account: &AccountSession) -> CommandResult<String> {
 
 // 預留一分鐘登入緩衝，避免連線建立到一半才發現權杖到期。
 /// 判斷現有權杖是否仍有至少一分鐘連線緩衝。
-/// @param account 含工作階段權杖及期限的帳號。
-/// @return 權杖存在且期限足夠時為 true。
+///
+/// # 參數
+///
+/// - `account` 含工作階段權杖及期限的帳號。
+///
+/// # 回傳
+///
+/// 權杖存在且期限足夠時為 true。
 fn session_is_current(account: &AccountSession) -> bool {
     account.secrets.session_token.is_some()
         && account

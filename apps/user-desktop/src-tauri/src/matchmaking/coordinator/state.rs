@@ -57,8 +57,14 @@ pub(crate) struct PresenceCheck {
 
 impl SessionState {
     /// 以空追蹤集合包裝初始快照。
-    /// @param snapshot 初始配對快照。
-    /// @return 尚未設定計畫的 SessionState。
+    ///
+    /// # 參數
+    ///
+    /// - `snapshot` 初始配對快照。
+    ///
+    /// # 回傳
+    ///
+    /// 尚未設定計畫的 SessionState。
     pub(crate) fn new(snapshot: MatchmakingSnapshot) -> Self {
         Self {
             snapshot,
@@ -80,14 +86,14 @@ impl SessionState {
     }
 
     /// 清除本輪追蹤並遞增世代，使舊 worker 結果失效。
-    /// @return 無回傳值。
     pub(crate) fn reset_round(&mut self) {
         self.clear_round_tracking();
         // 舊 worker event 不可以在新 round 重新寫入目前 session。
         self.target_generation = self.target_generation.wrapping_add(1);
     }
     /// 清空所有 Bot 與玩家的本輪觀察、嘗試及驗證資料。
-    /// @return 無回傳值；不自行改動快照或計畫。
+    ///
+    /// 不自行改動快照或計畫。
     pub(crate) fn clear_round_tracking(&mut self) {
         // 每輪觀察資料必須完全隔離，否則上一輪結果可能令新一輪誤判為成功。
         self.active_attempts.clear();
@@ -105,8 +111,12 @@ impl SessionState {
     }
 
     /// 移除單一 Bot 的佇列、轉服與驗證觀察。
-    /// @param bot_id 需重新嘗試的 Bot ID。
-    /// @return 無回傳值；其他 Bot 與玩家觀察保留。
+    ///
+    /// # 參數
+    ///
+    /// - `bot_id` 需重新嘗試的 Bot ID。
+    ///
+    /// 其他 Bot 與玩家觀察保留。
     pub(crate) fn clear_bot_attempt_tracking(&mut self, bot_id: &str) {
         self.bot_queues.remove(bot_id);
         self.bot_bedwars_queues.remove(bot_id);

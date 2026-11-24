@@ -31,8 +31,14 @@ pub(crate) struct MicrosoftSession {
 }
 
 /// 啟動裝置代碼登入，取得使用者需完成的驗證資訊。
-/// @param client 共用 HTTP client。
-/// @return 裝置代碼、驗證網址與輪詢期限。
+///
+/// # 參數
+///
+/// - `client` 共用 HTTP client。
+///
+/// # 回傳
+///
+/// 裝置代碼、驗證網址與輪詢期限。
 pub(crate) async fn request_device_code(
     client: &reqwest::Client,
 ) -> Result<azalea_auth::DeviceCodeResponse> {
@@ -42,9 +48,15 @@ pub(crate) async fn request_device_code(
 }
 
 /// 等待裝置驗證完成，再交換並驗證 Minecraft 工作階段。
-/// @param client 共用 HTTP client。
-/// @param code 同一次登入取得的裝置代碼回應。
-/// @return 可保存的更新權杖與 Minecraft 工作階段。
+///
+/// # 參數
+///
+/// - `client` 共用 HTTP client。
+/// - `code` 同一次登入取得的裝置代碼回應。
+///
+/// # 回傳
+///
+/// 可保存的更新權杖與 Minecraft 工作階段。
 pub(crate) async fn complete_device_login(
     client: &reqwest::Client,
     code: azalea_auth::DeviceCodeResponse,
@@ -63,9 +75,15 @@ pub(crate) async fn complete_device_login(
 
 /// 將舊版輸入的 Microsoft refresh token 換成目前可用的 Minecraft session。
 /// 沿用舊 Launcher 的 client ID 與 scope 更新登入。
-/// @param client 共用 HTTP client。
-/// @param refresh_token 舊 Launcher 提供的 Microsoft refresh token。
-/// @return 更新後的 Minecraft 工作階段。
+///
+/// # 參數
+///
+/// - `client` 共用 HTTP client。
+/// - `refresh_token` 舊 Launcher 提供的 Microsoft refresh token。
+///
+/// # 回傳
+///
+/// 更新後的 Minecraft 工作階段。
 pub(crate) async fn refresh_legacy(
     client: &reqwest::Client,
     refresh_token: &str,
@@ -89,9 +107,15 @@ pub(crate) async fn refresh_legacy(
 
 /// 以 Azalea device-code flow 產生的 refresh token 取得新的 Minecraft session。
 /// 更新 Azalea 裝置登入產生的工作階段。
-/// @param client 共用 HTTP client。
-/// @param refresh_token 已保存的 Microsoft refresh token。
-/// @return 新權杖、玩家資料與期限。
+///
+/// # 參數
+///
+/// - `client` 共用 HTTP client。
+/// - `refresh_token` 已保存的 Microsoft refresh token。
+///
+/// # 回傳
+///
+/// 新權杖、玩家資料與期限。
 pub(crate) async fn refresh(
     client: &reqwest::Client,
     refresh_token: &str,
@@ -109,11 +133,17 @@ pub(crate) async fn refresh(
 }
 
 /// 完成 Xbox／Minecraft 交換並驗證期限與玩家資料。
-/// @param client 共用 HTTP client。
-/// @param microsoft_access_token Microsoft access token。
-/// @param refresh_token 需保存在新工作階段的更新權杖。
-/// @param legacy_client 是否先嘗試舊版 RPS ticket 格式。
-/// @return 已驗證的 MicrosoftSession。
+///
+/// # 參數
+///
+/// - `client` 共用 HTTP client。
+/// - `microsoft_access_token` Microsoft access token。
+/// - `refresh_token` 需保存在新工作階段的更新權杖。
+/// - `legacy_client` 是否先嘗試舊版 RPS ticket 格式。
+///
+/// # 回傳
+///
+/// 已驗證的 MicrosoftSession。
 async fn session_from_microsoft_token(
     client: &reqwest::Client,
     microsoft_access_token: &str,

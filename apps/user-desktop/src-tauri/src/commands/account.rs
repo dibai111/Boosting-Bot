@@ -19,17 +19,29 @@ use tauri::State;
 
 #[tauri::command]
 /// 查詢前端可見帳號清單。
-/// @param state Tauri 管理的應用狀態。
-/// @return 帳號快照；序列化排除憑據。
+///
+/// # 參數
+///
+/// - `state` Tauri 管理的應用狀態。
+///
+/// # 回傳
+///
+/// 帳號快照；序列化排除憑據。
 pub(crate) async fn list_accounts(state: State<'_, AppState>) -> CommandResult<Vec<AccountRecord>> {
     state.runtime().list_accounts().await
 }
 
 #[tauri::command]
 /// 驗證並新增帳號，Microsoft 登入期間透過事件通知裝置代碼。
-/// @param input 帳號登入輸入。
-/// @param state Tauri 管理的應用狀態。
-/// @return 保存後的帳號或登入／儲存錯誤。
+///
+/// # 參數
+///
+/// - `input` 帳號登入輸入。
+/// - `state` Tauri 管理的應用狀態。
+///
+/// # 回傳
+///
+/// 保存後的帳號或登入／儲存錯誤。
 pub(crate) async fn add_account(
     input: CreateAccountInput,
     state: State<'_, AppState>,
@@ -39,9 +51,15 @@ pub(crate) async fn add_account(
 
 #[tauri::command]
 /// 停止指定 Bot 並刪除本機帳號。
-/// @param ids 待刪除的帳號 ID。
-/// @param state Tauri 管理的應用狀態。
-/// @return 實際刪除數量。
+///
+/// # 參數
+///
+/// - `ids` 待刪除的帳號 ID。
+/// - `state` Tauri 管理的應用狀態。
+///
+/// # 回傳
+///
+/// 實際刪除數量。
 pub(crate) async fn delete_accounts(
     ids: Vec<String>,
     state: State<'_, AppState>,
@@ -51,10 +69,16 @@ pub(crate) async fn delete_accounts(
 
 #[tauri::command]
 /// 驗證並更新帳號的目標伺服器。
-/// @param id 本機帳號 ID。
-/// @param server_address 新伺服器地址。
-/// @param state Tauri 管理的應用狀態。
-/// @return 更新結果。
+///
+/// # 參數
+///
+/// - `id` 本機帳號 ID。
+/// - `server_address` 新伺服器地址。
+/// - `state` Tauri 管理的應用狀態。
+///
+/// # 回傳
+///
+/// 更新結果。
 pub(crate) async fn update_server_address(
     id: String,
     server_address: String,

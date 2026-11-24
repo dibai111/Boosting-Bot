@@ -12,37 +12,48 @@
  */
 
 /** 組合功能模組並持有唯一執行狀態，透過 patchState 將變更一次交給頁面。 */
+import { createOverlayFeature, type OverlayDependencies } from "./overlay.ts";
 import type { UserApi } from "../adapters/api";
-import { createBotFeature, type BotFeatureState } from "./bots";
-import { createAppEntryFeature, type AppEntryFeatureState } from "./app-entry";
-import { createMatchmakingFeature, type MatchmakingFeatureState } from "./matchmaking-runtime";
+import type { MessageKey } from "../i18n";
+import {
+  createNickFeature,
+  type NickFeatureState,
+  type NickFeatureDependencies,
+} from "./nick-roller.ts";
+import { createBotFeature, type BotFeatureState, type BotFeatureDependencies } from "./bots.ts";
+import {
+  createAppEntryFeature,
+  type AppEntryFeatureState,
+  type AppEntryFeatureDependencies,
+} from "./app-entry.ts";
+import {
+  createMatchmakingFeature,
+  type MatchmakingFeatureState,
+  type MatchmakingFeatureDependencies,
+} from "./matchmaking-feature.ts";
 import type {
   Account,
   BotPhase,
+  BotEvent,
   GameKind,
   GameMode,
   MatchmakingSnapshot,
-  RuntimeMode,
+  RuntimeModeSnapshot,
   SessionLogEntry,
 } from "../models/types";
 
-type FeatureState = AppEntryFeatureState & BotFeatureState & MatchmakingFeatureState;
-
-type MatchmakingInput = {
-  selectedBotIds: Set<string>;
-  matchMode: GameMode;
-  matchGame: GameKind;
-  favoriteMatchModes: Set<string>;
-  verifyPresence: boolean;
-  verifyDuelPitch: boolean;
-  requiredMatches: number;
-  matchLogPath: string;
-};
-
-export type UserAppState = FeatureState;
+export type UserAppState = AppEntryFeatureState &
+  BotFeatureState &
+  MatchmakingFeatureState &
+  NickFeatureState;
 
 export interface UserAppControllerOptions {
-  api: UserApi;
+  api: BotFeatureDependencies["api"] &
+    AppEntryFeatureDependencies["api"] &
+    MatchmakingFeatureDependencies["api"] &
+    NickFeatureDependencies["api"] &
+    OverlayDependencies["api"] &
+    Pick<UserApi, "activeMode">;
   appWindowExpandDurationMs: number;
   initialMatchMode: GameMode;
   initialMatchGame: GameKind;
@@ -55,12 +66,13 @@ export interface UserAppControllerOptions {
   phaseLabel: (phase: BotPhase) => string;
   addLog: (message: string, botId?: string | null, level?: SessionLogEntry["level"]) => void;
   showToast: (message: string, kind: "success" | "error") => void;
-  savePreference: (key: string, value: string) => void;
-  translate: (key: string) => string;
+  savePreferences: (patch: Record<string, string>) => Promise<void>;
+  translate: (key: MessageKey) => string;
   onChange: (state: UserAppState) => void;
 }
 
 const idleMatchmaking: MatchmakingSnapshot = {
+  revision: 0,
   phase: "idle",
   required_matches: 0,
   matched_bots: 0,
@@ -73,7 +85,10 @@ const idleMatchmaking: MatchmakingSnapshot = {
  * @return 供頁面使用的操作與狀態同步介面。
  */
 export function createUserAppController(options: UserAppControllerOptions) {
-  let state: FeatureState = {
+  let state: UserAppState = {
+    nickBots: {},
+    nickEvents: [],
+    nickBusy: false,
     appEntryPhase: "idle",
     appMemoryBytes: null,
     accounts: [],
@@ -97,12 +112,33 @@ export function createUserAppController(options: UserAppControllerOptions) {
     logPathDialogOpen: false,
   };
 
-  const getState = (): FeatureState => state;
-  const patchState = (patch: Partial<FeatureState>): void => {
+  const getState = (): UserAppState => state;
+  const patchState = (patch: Partial<UserAppState>): void => {
     state = { ...state, ...patch };
+    // 最低配對數只依賴草稿與已選線上帳號；其他事件毋須重新掃描帳號。
+    if (patch.accounts || patch.selectedBotIds || patch.phases || "requiredMatches" in patch) {
+      const selectedOnlineCount = state.accounts.filter(
+        (account) => state.selectedBotIds.has(account.id) && state.phases[account.id] === "online",
+      ).length;
+      const requestedCount = Number.isFinite(state.requiredMatches)
+        ? Math.floor(state.requiredMatches)
+        : 1;
+      state.requiredMatches = Math.max(1, Math.min(requestedCount, selectedOnlineCount));
+    }
+    if (patch.accounts) {
+      const accountIds = new Set(state.accounts.map((account) => account.id));
+      state.nickBots = Object.fromEntries(
+        Object.entries(state.nickBots).filter(([id]) => accountIds.has(id)),
+      );
+    }
     options.onChange(state);
   };
 
+  let runtimeMode: RuntimeModeSnapshot = { revision: -1, mode: "idle", nick_run_id: null };
+  const overlay = createOverlayFeature({
+    api: options.api,
+    onChange: (snapshot) => patchState({ overlayVisible: snapshot.visible }),
+  });
   const appEntry = createAppEntryFeature({
     api: options.api,
     getState,
@@ -112,6 +148,8 @@ export function createUserAppController(options: UserAppControllerOptions) {
     appWindowExpandDurationMs: options.appWindowExpandDurationMs,
   });
   const bots = createBotFeature({
+    hideOverlay: overlay.hide,
+    applyMatchmakingSnapshot: (snapshot) => matchmaking.applySnapshot(snapshot),
     api: options.api,
     getState,
     patchState,
@@ -120,58 +158,67 @@ export function createUserAppController(options: UserAppControllerOptions) {
     showToast: options.showToast,
   });
   const matchmaking = createMatchmakingFeature({
+    overlay,
     api: options.api,
     getState,
     patchState,
     addLog: options.addLog,
-    savePreference: options.savePreference,
+    savePreferences: options.savePreferences,
     showToast: options.showToast,
     translate: options.translate,
   });
+  const nick = createNickFeature({
+    applyRuntimeMode,
+    api: options.api,
+    getState,
+    patchState,
+    translate: options.translate,
+    showToast: options.showToast,
+  });
+  function handleBotEvent(event: BotEvent): void {
+    if (event.type === "runtime_mode") {
+      applyRuntimeMode(event);
+      return;
+    }
+    nick.handleBotEvent(event);
+    bots.handleBotEvent(event);
+  }
   function setAccounts(accounts: Account[]): void {
-    patchState({ accounts });
-  }
-
-  function setPhases(phases: Record<string, BotPhase>): void {
-    patchState({ phases });
-  }
-
-  function setActiveMode(activeMode: RuntimeMode): void {
-    patchState({ activeMode });
-  }
-
-  function setSelectedBotIds(selectedBotIds: Set<string>): void {
-    patchState({ selectedBotIds: new Set(selectedBotIds) });
-  }
-
-  /**
-   * 將頁面配對輸入一次寫入 controller。
-   * @param input 目前選擇、模式及驗證設定。
-   * @return 無回傳值；複製 Set 避免共用可變集合。
-   */
-  function applyMatchmakingInput(input: MatchmakingInput): void {
     patchState({
-      selectedBotIds: new Set(input.selectedBotIds),
-      matchMode: input.matchMode,
-      matchGame: input.matchGame,
-      favoriteMatchModes: new Set(input.favoriteMatchModes),
-      verifyPresence: input.verifyPresence,
-      verifyDuelPitch: input.verifyDuelPitch,
-      requiredMatches: input.requiredMatches,
-      matchLogPath: input.matchLogPath,
+      accounts,
+      phases: Object.fromEntries(
+        accounts.map((account) => [account.id, state.phases[account.id] ?? "offline"]),
+      ),
     });
   }
 
-  function setMatchLogPath(matchLogPath: string): void {
-    patchState({ matchLogPath });
+  function applyRuntimeMode(next: RuntimeModeSnapshot): boolean {
+    if (next.revision <= runtimeMode.revision) return false;
+    const newNickRun = next.mode === "nick_roller" && next.nick_run_id !== runtimeMode.nick_run_id;
+    runtimeMode = next;
+    if (newNickRun) nick.beginRun();
+    patchState({ activeMode: next.mode });
+    return true;
+  }
+  async function refreshRuntimeMode(): Promise<void> {
+    applyRuntimeMode(await options.api.activeMode());
+  }
+  function handleMatchmakingState(next: MatchmakingSnapshot): void {
+    const accepted = matchmaking.handleMatchmakingState(next);
+    if (
+      accepted &&
+      (next.phase === "idle" || next.phase === "failed") &&
+      state.activeMode === "matching"
+    ) {
+      void refreshRuntimeMode().catch((error) => options.showToast(String(error), "error"));
+    }
   }
 
-  function setMatchmakingSnapshot(next: MatchmakingSnapshot): void {
-    patchState({ matchmaking: next });
-  }
-
-  function setOverlayVisible(overlayVisible: boolean): void {
-    patchState({ overlayVisible });
+  function toggleBotSelection(botId: string): void {
+    const next = new Set(state.selectedBotIds);
+    if (next.has(botId)) next.delete(botId);
+    else next.add(botId);
+    patchState({ selectedBotIds: next });
   }
 
   function clearDeviceCode(): void {
@@ -184,26 +231,6 @@ export function createUserAppController(options: UserAppControllerOptions) {
 
   function closeLogPathDialog(): void {
     patchState({ logPathDialogOpen: false });
-  }
-
-  /**
-   * 先同步最新頁面輸入，再啟動配對。
-   * @param input 本次配對輸入。
-   * @return 啟動流程的 Promise。
-   */
-  async function startMatchmaking(input: MatchmakingInput): Promise<void> {
-    applyMatchmakingInput(input);
-    await matchmaking.start();
-  }
-
-  /**
-   * 先同步最新頁面輸入，再切換配對啟停。
-   * @param input 本次配對輸入。
-   * @return 操作流程的 Promise。
-   */
-  async function toggleMatchmaking(input: MatchmakingInput): Promise<void> {
-    applyMatchmakingInput(input);
-    await matchmaking.toggle();
   }
 
   function continueWithLogPath(matchLogPath: string): void {
@@ -219,32 +246,33 @@ export function createUserAppController(options: UserAppControllerOptions) {
     clearDeviceCode,
     deleteAccounts: bots.deleteAccounts,
     handleMatchmakingShortcut: matchmaking.handleShortcut,
-    handleMatchmakingState: matchmaking.handleMatchmakingState,
-    handleBotEvent: bots.handleBotEvent,
+    handleMatchmakingState,
+    handleBotEvent,
+    startNickRoller: nick.start,
+    stopNickRoller: nick.stop,
+    answerNickDecision: nick.decide,
+    updateMatchmakingInput: matchmaking.updateInput,
     finishAppEntry: appEntry.finishAppEntry,
     hideMatchmakingOverlay: matchmaking.hideOverlay,
     refreshMemory: appEntry.refreshMemory,
     selectMatchGame: matchmaking.selectMatchGame,
     selectMatchMode: matchmaking.selectMatchMode,
     saveServerFor: bots.saveServerFor,
-    setActiveMode,
+    refreshRuntimeMode,
     setAccounts,
     setDeviceLinkError,
-    setMatchLogPath,
-    setOverlayVisible,
-    setPhases,
-    setSelectedBotIds,
-    setMatchmakingSnapshot,
+    handleOverlayState: overlay.apply,
+    refreshOverlay: overlay.refresh,
+    toggleBotSelection,
+    setMatchmakingSnapshot: matchmaking.applySnapshot,
     showApp: appEntry.showApp,
-    startMatchmaking,
     startSelected: bots.startSelected,
-    stopAccounts: bots.stopAccounts,
     stopMatchmaking: matchmaking.stop,
     stopSelected: bots.stopSelected,
     stopSession: bots.stopSession,
     toggleDuelPitchVerification: matchmaking.toggleDuelPitchVerification,
     toggleFavorite: matchmaking.toggleFavorite,
-    toggleMatchmaking,
+    toggleMatchmaking: matchmaking.toggle,
     toggleMatchmakingOverlay: matchmaking.toggleOverlay,
     togglePresenceVerification: matchmaking.togglePresenceVerification,
   };

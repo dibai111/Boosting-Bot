@@ -12,7 +12,7 @@
  */
 
 /** 依序執行視窗調整、畫面展開和入場動畫；序號用來忽略被取代的非同步流程。 */
-import { waitForViewportLayout } from "../../../../shared-ui/viewport-fit";
+import { waitForViewportLayout } from "../../../../shared-ui/viewport-fit.ts";
 import type { UserApi } from "../adapters/api";
 
 export type AppEntryPhase = "idle" | "resizing" | "preparing" | "expanding" | "playing";

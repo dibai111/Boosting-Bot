@@ -24,9 +24,15 @@ pub(crate) struct MinecraftProfile {
 
 /// 透過 Azalea 驗證 Minecraft access token，並取得帳號基本資料。
 /// 驗證 access token 並讀取玩家資料。
-/// @param client 共用 HTTP client。
-/// @param access_token Minecraft access token。
-/// @return 玩家資料；服務拒絕或名稱缺失時回傳錯誤。
+///
+/// # 參數
+///
+/// - `client` 共用 HTTP client。
+/// - `access_token` Minecraft access token。
+///
+/// # 回傳
+///
+/// 玩家資料；服務拒絕或名稱缺失時回傳錯誤。
 pub(crate) async fn fetch(
     client: &reqwest::Client,
     access_token: &str,

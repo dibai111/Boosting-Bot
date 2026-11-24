@@ -52,7 +52,10 @@ struct PendingRetry {
 
 impl MatchController {
     /// 建立尚未配對的控制器。
-    /// @return 沒有有效嘗試或觀察資料的控制器。
+    ///
+    /// # 回傳
+    ///
+    /// 沒有有效嘗試或觀察資料的控制器。
     pub(super) fn new() -> Self {
         Self {
             active: None,
@@ -62,10 +65,14 @@ impl MatchController {
     }
 
     /// 清除上一個嘗試後發出遊戲佇列指令。
-    /// @param client 已生成角色的連線。
-    /// @param attempt 含 session、round、generation 及模式的嘗試。
-    /// @param now 本次嘗試的單調時鐘時間。
-    /// @return 無回傳值；開始等待轉服訊息。
+    ///
+    /// # 參數
+    ///
+    /// - `client` 已生成角色的連線。
+    /// - `attempt` 含 session、round、generation 及模式的嘗試。
+    /// - `now` 本次嘗試的單調時鐘時間。
+    ///
+    /// 開始等待轉服訊息。
     pub(super) fn begin(&mut self, client: &Client, attempt: MatchAttempt, now: Instant) {
         self.cancel();
         client.chat(attempt.mode.play_command());
@@ -80,7 +87,8 @@ impl MatchController {
     }
 
     /// 清除配對、重試與俯仰追蹤狀態。
-    /// @return 無回傳值；不直接發送網路指令。
+    ///
+    /// 不直接發送網路指令。
     pub(super) fn cancel(&mut self) {
         self.active = None;
         self.retry = None;
@@ -88,9 +96,11 @@ impl MatchController {
     }
 
     /// 取消嘗試，角色已生成時才發送返回大廳指令。
-    /// @param client 目前連線。
-    /// @param spawned 角色是否已可接收聊天指令。
-    /// @return 無回傳值。
+    ///
+    /// # 參數
+    ///
+    /// - `client` 目前連線。
+    /// - `spawned` 角色是否已可接收聊天指令。
     pub(super) fn return_to_lobby(&mut self, client: &Client, spawned: bool) {
         self.cancel();
         if spawned {
@@ -99,10 +109,14 @@ impl MatchController {
     }
 
     /// 先清除舊嘗試，再要求進入 Limbo。
-    /// @param client 目前連線。
-    /// @param request_id 協調器指定的重試識別碼。
-    /// @param now 計算 Limbo 逾時的基準時間。
-    /// @return 無回傳值；準備結果透過事件回報。
+    ///
+    /// # 參數
+    ///
+    /// - `client` 目前連線。
+    /// - `request_id` 協調器指定的重試識別碼。
+    /// - `now` 計算 Limbo 逾時的基準時間。
+    ///
+    /// 準備結果透過事件回報。
     pub(super) fn prepare_retry(&mut self, client: &Client, request_id: String, now: Instant) {
         self.cancel();
         self.retry = Some(PendingRetry {
@@ -113,11 +127,15 @@ impl MatchController {
     }
 
     /// 將聊天訊號轉成轉服、佇列、重試及遊戲階段事件。
-    /// @param message 伺服器可見聊天文字。
-    /// @param bot_id 此連線的 Bot ID。
-    /// @param emitter 此連線的事件發送器。
-    /// @param now 本次觀察時間。
-    /// @return 無回傳值；只更新目前嘗試並發布對應事件。
+    ///
+    /// # 參數
+    ///
+    /// - `message` 伺服器可見聊天文字。
+    /// - `bot_id` 此連線的 Bot ID。
+    /// - `emitter` 此連線的事件發送器。
+    /// - `now` 本次觀察時間。
+    ///
+    /// 只更新目前嘗試並發布對應事件。
     pub(super) fn handle_chat(
         &mut self,
         message: &str,
@@ -209,11 +227,15 @@ impl MatchController {
     }
 
     /// 需要俯仰驗證時才掃描附近玩家，確認後立即停止掃描。
-    /// @param client 目前連線。
-    /// @param now 掃描節流與穩定手勢判斷時間。
-    /// @param bot_id 此連線的 Bot ID。
-    /// @param emitter 此連線的事件發送器。
-    /// @return 無回傳值；符合條件時發布俯仰觀察。
+    ///
+    /// # 參數
+    ///
+    /// - `client` 目前連線。
+    /// - `now` 掃描節流與穩定手勢判斷時間。
+    /// - `bot_id` 此連線的 Bot ID。
+    /// - `emitter` 此連線的事件發送器。
+    ///
+    /// 符合條件時發布俯仰觀察。
     pub(super) fn tick(
         &mut self,
         client: &Client,
@@ -265,10 +287,14 @@ impl MatchController {
     }
 
     /// 結束已超過期限的轉服或 Limbo 準備。
-    /// @param now 當前單調時鐘時間。
-    /// @param bot_id 此連線的 Bot ID。
-    /// @param emitter 此連線的事件發送器。
-    /// @return 無回傳值；逾時會發布帶識別碼的失敗事件。
+    ///
+    /// # 參數
+    ///
+    /// - `now` 當前單調時鐘時間。
+    /// - `bot_id` 此連線的 Bot ID。
+    /// - `emitter` 此連線的事件發送器。
+    ///
+    /// 逾時會發布帶識別碼的失敗事件。
     pub(super) fn check_timeouts(&mut self, now: Instant, bot_id: &str, emitter: &SessionEmitter) {
         if self
             .active

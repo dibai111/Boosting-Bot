@@ -33,10 +33,16 @@ pub(super) struct MinecraftAccessTokenAccount {
 
 impl MinecraftAccessTokenAccount {
     /// 建立帳號介面並初始化空的憑證快取。
-    /// @param username Minecraft 玩家名稱。
-    /// @param uuid Minecraft profile UUID。
-    /// @param access_token 已驗證的 Minecraft access token。
-    /// @return 供 Azalea 連線使用的帳號。
+    ///
+    /// # 參數
+    ///
+    /// - `username` Minecraft 玩家名稱。
+    /// - `uuid` Minecraft profile UUID。
+    /// - `access_token` 已驗證的 Minecraft access token。
+    ///
+    /// # 回傳
+    ///
+    /// 供 Azalea 連線使用的帳號。
     pub(super) fn new(username: String, uuid: Uuid, access_token: String) -> Self {
         Self {
             username,
@@ -85,11 +91,17 @@ impl AccountTrait for MinecraftAccessTokenAccount {
     }
 
     /// 完成 Minecraft session server 的加入驗證。
-    /// @param public_key 遊戲伺服器提供的公鑰。
-    /// @param private_key 本次連線的共享密鑰。
-    /// @param server_id 伺服器握手識別字串。
-    /// @param proxy 選用的 HTTP proxy。
-    /// @return 可等待的 session server 驗證結果。
+    ///
+    /// # 參數
+    ///
+    /// - `public_key` 遊戲伺服器提供的公鑰。
+    /// - `private_key` 本次連線的共享密鑰。
+    /// - `server_id` 伺服器握手識別字串。
+    /// - `proxy` 選用的 HTTP proxy。
+    ///
+    /// # 回傳
+    ///
+    /// 可等待的 session server 驗證結果。
     fn join<'a>(
         &'a self,
         public_key: &'a [u8],

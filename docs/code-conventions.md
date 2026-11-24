@@ -8,12 +8,12 @@
 - TypeScript 函式、變數使用 `camelCase`，型別使用 `PascalCase`；布林值以 `is`、`has`、`can`、`should` 等能表達判斷的字詞命名。
 - Rust 檔案、模組、函式使用 `snake_case`，型別使用 `PascalCase`，常數使用 `SCREAMING_SNAKE_CASE`。
 - IPC／持久化資料欄位沿用現有 `snake_case` 契約；不要只為前端命名偏好更改序列化格式。
-- 前端交由 Prettier 格式化，Rust 交由 rustfmt 格式化。使用 UTF-8、LF 換行；前端縮排兩格，Rust 縮排四格。
+- 前端交由 Prettier 格式化，Rust 交由 rustfmt 格式化。使用 UTF-8 和 LF 換行，Git 透過 `.gitattributes` 統一換行。前端縮排兩格，Rust 縮排四格。
 - 中文註解說明模組責任、狀態轉移、資源生命週期及不直觀的限制，不逐行翻譯程式碼。`SAFETY:` 保留標識，說明以中文撰寫。
 
 ## 模組責任
 
-自有核心原始碼檔案保留 `AGPL-3.0-only` SPDX Header 及原作者版權。Rust 以 `///`、TypeScript 以 JSDoc 說明關鍵函式用途、`@param` 與 `@return`；參數需交代時間／角度／尺寸單位、所有權及可空值語意。型別說明描述其責任；無參數函式不加入虛構參數。JSON 與產生的 schema 不插入註解，授權由 package metadata 及 LICENSE 表達。
+自有原始碼與測試保留 `AGPL-3.0-only` SPDX 標頭及原作者版權。Rust 使用 `//!` 說明模組責任，使用 `///` 為關鍵函式撰寫 Rustdoc，按需要加上「參數」與「回傳」段落。TypeScript 使用 JSDoc 的 `@param` 和 `@return`。文件交代時間、角度及尺寸的單位，以及資料所有權、可空值和失敗的語意。JSON 與產生的 schema 維持工具要求的格式，授權由套件中繼資料及 LICENSE 表達。
 
 | 位置                                   | 責任                                           |
 | -------------------------------------- | ---------------------------------------------- |

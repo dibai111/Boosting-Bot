@@ -88,7 +88,10 @@ pub(crate) enum GameKind {
 
 impl GameMode {
     /// 將具體遊戲模式對應至策略種類。
-    /// @return Bedwars、Duels 或 Skywars。
+    ///
+    /// # 回傳
+    ///
+    /// Bedwars、Duels 或 Skywars。
     pub(crate) const fn kind(self) -> GameKind {
         match self {
             Self::BedwarsSolo
@@ -123,7 +126,10 @@ impl GameMode {
     }
 
     /// 取得伺服器辨識的固定遊戲佇列指令。
-    /// @return 以 /play 開頭的靜態字串。
+    ///
+    /// # 回傳
+    ///
+    /// 以 /play 開頭的靜態字串。
     pub(crate) const fn play_command(self) -> &'static str {
         match self {
             Self::BedwarsSolo => "/play bedwars_eight_one",
@@ -179,6 +185,14 @@ pub(crate) enum RuntimeMode {
     NickRoller,
 }
 
+#[derive(Debug, Clone, Copy, Serialize)]
+/// 工作模式的單調版本與 Nick 執行身分，供查詢及事件共用。
+pub(crate) struct RuntimeModeSnapshot {
+    pub(crate) revision: u64,
+    pub(crate) mode: RuntimeMode,
+    pub(crate) nick_run_id: Option<u64>,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 /// Bot 所見的遊戲開始或結束訊號。
@@ -197,7 +211,10 @@ pub(crate) enum DuelPitchDirection {
 
 impl DuelPitchDirection {
     /// 取得俯仰方向的診斷名稱。
-    /// @return up 或 down。
+    ///
+    /// # 回傳
+    ///
+    /// up 或 down。
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Up => "up",
@@ -232,11 +249,22 @@ pub(crate) enum BotCommand {
     SendChat(String),
     BeginMatchAttempt(MatchAttempt),
     ReturnToLobby,
-    PrepareMatchRetry { request_id: String },
+    PrepareMatchRetry {
+        request_id: String,
+    },
     CancelMatchAttempt,
-    StartNickRoller { config: NickRollerConfig },
-    StopNickRoller,
-    NickDecision { candidate_id: u64, take: bool },
+    StartNickRoller {
+        run_id: u64,
+        config: NickRollerConfig,
+    },
+    StopNickRoller {
+        run_id: u64,
+    },
+    NickDecision {
+        run_id: u64,
+        candidate_id: u64,
+        take: bool,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -244,7 +272,8 @@ pub(crate) enum BotCommand {
 /// 對前端及配對協調器發布的 tagged union 事件契約。
 pub(crate) enum BotEvent {
     RuntimeMode {
-        mode: RuntimeMode,
+        #[serde(flatten)]
+        snapshot: RuntimeModeSnapshot,
     },
     Status {
         bot_id: String,
@@ -269,11 +298,15 @@ pub(crate) enum BotEvent {
         error: Option<String>,
     },
     NickRollerState {
+        #[serde(skip)]
+        run_id: u64,
         bot_id: String,
         phase: NickRollerPhase,
         message: Option<String>,
     },
     NickCandidate {
+        #[serde(skip)]
+        run_id: u64,
         bot_id: String,
         candidate_id: u64,
         nick: String,
@@ -285,6 +318,8 @@ pub(crate) enum BotEvent {
         decision_timeout_ms: Option<u64>,
     },
     NickVerification {
+        #[serde(skip)]
+        run_id: u64,
         bot_id: String,
         candidate_id: u64,
         expected_nick: String,
@@ -294,6 +329,8 @@ pub(crate) enum BotEvent {
         processed_count: u32,
     },
     NickAttention {
+        #[serde(skip)]
+        run_id: u64,
         bot_id: String,
         code: String,
         message: String,

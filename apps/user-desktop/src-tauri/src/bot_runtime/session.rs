@@ -68,10 +68,16 @@ struct SessionOutcome {
 }
 
 /// 組合 Azalea 連線與 actor，待兩者收尾後發布離線事件。
-/// @param config 已驗證的連線設定。
-/// @param commands 外部指令接收端。
-/// @param emitter 此連線的事件發送器。
-/// @return 整個 Bot 工作階段結束後完成。
+///
+/// # 參數
+///
+/// - `config` 已驗證的連線設定。
+/// - `commands` 外部指令接收端。
+/// - `emitter` 此連線的事件發送器。
+///
+/// # 回傳
+///
+/// 整個 Bot 工作階段結束後完成。
 pub(super) async fn run(
     config: BotConfig,
     commands: mpsc::Receiver<SessionCommand>,
@@ -145,10 +151,16 @@ pub(super) async fn run(
 }
 
 /// 把 Azalea 事件轉入 actor；通道滿時可略過 Tick。
-/// @param bot 目前連線 client。
-/// @param event Azalea 提供的原始事件。
-/// @param state 共享輸入通道及停止旗標。
-/// @return 事件入列或退出安排完成後返回。
+///
+/// # 參數
+///
+/// - `bot` 目前連線 client。
+/// - `event` Azalea 提供的原始事件。
+/// - `state` 共享輸入通道及停止旗標。
+///
+/// # 回傳
+///
+/// 事件入列或退出安排完成後返回。
 async fn handle_azalea_event(bot: Client, event: Event, state: HandlerState) {
     if state.shutdown_requested.load(Ordering::Acquire) {
         exit_after_grace(bot, state.exit_requested).await;
@@ -205,8 +217,14 @@ fn request_client_exit(bot: &Client, exit_requested: &AtomicBool) {
 }
 
 /// 以原子交換確保每個 client 只發出一次退出要求。
-/// @param exit_requested 此連線共享的退出旗標。
-/// @return 本次取得退出責任時為 true。
+///
+/// # 參數
+///
+/// - `exit_requested` 此連線共享的退出旗標。
+///
+/// # 回傳
+///
+/// 本次取得退出責任時為 true。
 fn claim_client_exit(exit_requested: &AtomicBool) -> bool {
     exit_requested
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
@@ -233,6 +251,7 @@ struct SessionActor {
     afk: AdvancedAfk,
     matchmaking: MatchController,
     nick_roller: NickRoller,
+    nick_run_id: u64,
     last_nick_book: Option<ItemStack>,
     exit_reason: String,
 }
@@ -261,13 +280,17 @@ impl SessionActor {
             afk: AdvancedAfk::new(now),
             matchmaking: MatchController::new(),
             nick_roller: NickRoller::new(),
+            nick_run_id: 0,
             last_nick_book: None,
             exit_reason: "Bot session ended".to_owned(),
         }
     }
 
     /// 輪詢指令、連線事件與逾時計時器，停止時清理所有子流程。
-    /// @return 包含最終停止原因的 SessionOutcome。
+    ///
+    /// # 回傳
+    ///
+    /// 包含最終停止原因的 SessionOutcome。
     async fn run(mut self) -> SessionOutcome {
         let mut timers = tokio::time::interval(Duration::from_millis(50));
         timers.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -328,11 +351,16 @@ impl SessionActor {
     }
 
     /// 將業務指令分派至 Nick 或一般連線流程。
-    /// @param command BotRuntime 傳入的指令。
-    /// @return 無回傳值；未就緒時發布錯誤事件。
+    ///
+    /// # 參數
+    ///
+    /// - `command` BotRuntime 傳入的指令。
+    ///
+    /// 未就緒時發布錯誤事件。
     fn dispatch(&mut self, command: BotCommand) {
         match command {
-            BotCommand::StartNickRoller { config } => {
+            BotCommand::StartNickRoller { run_id, config } => {
+                self.nick_run_id = run_id;
                 let Some(client) = self.client.clone() else {
                     self.emit_nick_failure("Bot has not connected");
                     return;
@@ -350,13 +378,23 @@ impl SessionActor {
                 });
                 self.apply_nick_actions(Some(&client), actions);
             }
-            BotCommand::StopNickRoller => {
+            BotCommand::StopNickRoller { run_id } => {
+                if run_id != self.nick_run_id {
+                    return;
+                }
                 self.last_nick_book = None;
                 let actions = self.nick_roller.handle(NickInput::Stop);
                 let client = self.client.clone();
                 self.apply_nick_actions(client.as_ref(), actions);
             }
-            BotCommand::NickDecision { candidate_id, take } => {
+            BotCommand::NickDecision {
+                run_id,
+                candidate_id,
+                take,
+            } => {
+                if run_id != self.nick_run_id {
+                    return;
+                }
                 let actions = self.nick_roller.handle(NickInput::Decision {
                     candidate_id,
                     take,
@@ -376,9 +414,13 @@ impl SessionActor {
     }
 
     /// 執行聊天、配對及回大廳指令，維持 Nick 互斥限制。
-    /// @param command 一般 Bot 業務指令。
-    /// @param client 已取得的 Azalea client。
-    /// @return 無回傳值；執行結果透過事件回報。
+    ///
+    /// # 參數
+    ///
+    /// - `command` 一般 Bot 業務指令。
+    /// - `client` 已取得的 Azalea client。
+    ///
+    /// 執行結果透過事件回報。
     fn dispatch_standard(&mut self, command: BotCommand, client: &Client) {
         match command {
             BotCommand::SendChat(message) => {
@@ -424,7 +466,7 @@ impl SessionActor {
             }
             BotCommand::CancelMatchAttempt => self.matchmaking.cancel(),
             BotCommand::StartNickRoller { .. }
-            | BotCommand::StopNickRoller
+            | BotCommand::StopNickRoller { .. }
             | BotCommand::NickDecision { .. } => {
                 self.emit_error("invalid_command", "Nick Roller command was not dispatched");
             }
@@ -432,8 +474,14 @@ impl SessionActor {
     }
 
     /// 以連線事件推進 Bot 生命週期與業務狀態機。
-    /// @param input 已轉換的 Azalea 輸入。
-    /// @return true 表示 actor 應結束，false 表示繼續。
+    ///
+    /// # 參數
+    ///
+    /// - `input` 已轉換的 Azalea 輸入。
+    ///
+    /// # 回傳
+    ///
+    /// true 表示 actor 應結束，false 表示繼續。
     fn handle_input(&mut self, input: SessionInput) -> bool {
         match input {
             SessionInput::Init(client) => {
@@ -542,7 +590,6 @@ impl SessionActor {
     }
 
     /// 清除 Nick、配對、AFK 及書本快取，斷線後不再對 client 發送動作。
-    /// @return 無回傳值。
     fn cleanup(&mut self) {
         let client = if self.connection_closed {
             None
@@ -565,9 +612,13 @@ impl SessionActor {
     }
 
     /// 依序執行 Nick 狀態機輸出的聊天及 UI 事件。
-    /// @param client 可用的連線；斷線時為 None。
-    /// @param actions 此輪狀態轉移產生的有序動作。
-    /// @return 無回傳值；結束時視連線狀態恢復 AFK。
+    ///
+    /// # 參數
+    ///
+    /// - `client` 可用的連線；斷線時為 None。
+    /// - `actions` 此輪狀態轉移產生的有序動作。
+    ///
+    /// 結束時視連線狀態恢復 AFK。
     fn apply_nick_actions(&mut self, client: Option<&Client>, actions: Vec<NickAction>) {
         let mut terminal = false;
         for action in actions {
@@ -582,6 +633,7 @@ impl SessionActor {
                 NickAction::State { phase, message } => {
                     terminal |= phase.is_terminal();
                     self.emitter.publish(BotEvent::NickRollerState {
+                        run_id: self.nick_run_id,
                         bot_id: self.bot_id.clone(),
                         phase,
                         message,
@@ -597,6 +649,7 @@ impl SessionActor {
                     rejected_count,
                     decision_timeout_ms,
                 } => self.emitter.publish(BotEvent::NickCandidate {
+                    run_id: self.nick_run_id,
                     bot_id: self.bot_id.clone(),
                     candidate_id,
                     nick,
@@ -615,6 +668,7 @@ impl SessionActor {
                     reason,
                     processed_count,
                 } => self.emitter.publish(BotEvent::NickVerification {
+                    run_id: self.nick_run_id,
                     bot_id: self.bot_id.clone(),
                     candidate_id,
                     expected_nick,
@@ -625,6 +679,7 @@ impl SessionActor {
                 }),
                 NickAction::Attention { code, message } => {
                     self.emitter.publish(BotEvent::NickAttention {
+                        run_id: self.nick_run_id,
                         bot_id: self.bot_id.clone(),
                         code,
                         message,
@@ -662,8 +717,14 @@ impl SessionActor {
 
     // 背包每 tick 都可讀到同一本書；只在內容改變時交給 Nick 狀態機。
     /// 只在背包中的書本內容變更時解讀 Nick 結果。
-    /// @param client 目前已建立的 Azalea 連線。
-    /// @return 新書本頁面；沒有書本或內容未變時為 None。
+    ///
+    /// # 參數
+    ///
+    /// - `client` 目前已建立的 Azalea 連線。
+    ///
+    /// # 回傳
+    ///
+    /// 新書本頁面；沒有書本或內容未變時為 None。
     fn read_nick_book(&mut self, client: &Client) -> Option<NickBook> {
         let item = client
             .get_inventory()
@@ -693,6 +754,7 @@ impl SessionActor {
 
     fn emit_nick_failure(&self, message: &str) {
         self.emitter.publish(BotEvent::NickRollerState {
+            run_id: self.nick_run_id,
             bot_id: self.bot_id.clone(),
             phase: NickRollerPhase::Failed,
             message: Some(message.to_owned()),

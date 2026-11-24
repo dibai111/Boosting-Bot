@@ -24,7 +24,7 @@ use anyhow::Result;
 pub use models::{AccountRecord, AccountSession, AuthKind, CreateAccountInput, UserSettings};
 use std::sync::{Arc, Mutex};
 
-/// 目前 Windows 使用者的 DPAPI／Registry 儲存入口；讀改寫須由呼叫端序列化。
+/// 目前 Windows 使用者的 DPAPI／Registry 儲存入口；複製的 Store 共用讀改寫鎖。
 #[derive(Clone)]
 pub struct Store {
     registry_path: String,

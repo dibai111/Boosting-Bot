@@ -48,6 +48,7 @@ https://www.gnu.org/licenses/agpl-3.0.html
   }
 
   onMount(() => {
+    // 只在選單外點擊時收合，讓收藏按鈕可在選單內連續操作。
     const closeOutside = (event: PointerEvent) => {
       if (open && !root.contains(event.target as Node)) open = false;
     };

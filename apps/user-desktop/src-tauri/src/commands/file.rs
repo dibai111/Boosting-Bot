@@ -40,9 +40,13 @@ pub(crate) struct DroppedFileAccess {
 
 impl DroppedFileAccess {
     /// 以原生拖放的第一個檔案替換舊授權。
-    /// @param window_label 產生拖放的視窗標籤。
-    /// @param paths Tauri 原生拖放提供的路徑清單。
-    /// @return 無回傳值；無法正規化時清除授權。
+    ///
+    /// # 參數
+    ///
+    /// - `window_label` 產生拖放的視窗標籤。
+    /// - `paths` Tauri 原生拖放提供的路徑清單。
+    ///
+    /// 無法正規化時清除授權。
     pub(crate) fn authorize_native_drop(&self, window_label: &str, paths: &[PathBuf]) {
         let canonical_path = paths
             .first()
@@ -51,9 +55,15 @@ impl DroppedFileAccess {
     }
 
     /// 核對視窗、路徑及期限，消耗最近的讀取授權。
-    /// @param window_label 要求讀取的視窗標籤。
-    /// @param candidate 前端傳入的候選路徑。
-    /// @return 授權的正規路徑；不符合條件時為 None。
+    ///
+    /// # 參數
+    ///
+    /// - `window_label` 要求讀取的視窗標籤。
+    /// - `candidate` 前端傳入的候選路徑。
+    ///
+    /// # 回傳
+    ///
+    /// 授權的正規路徑；不符合條件時為 None。
     pub(crate) fn take_authorized_path(
         &self,
         window_label: &str,
@@ -92,8 +102,14 @@ impl DroppedFileAccess {
 
 #[tauri::command]
 /// 只允許開啟 Microsoft HTTPS 登入網址。
-/// @param url 裝置代碼登入的驗證網址。
-/// @return 系統啟動瀏覽器結果；非 Windows 不支援。
+///
+/// # 參數
+///
+/// - `url` 裝置代碼登入的驗證網址。
+///
+/// # 回傳
+///
+/// 系統啟動瀏覽器結果；非 Windows 不支援。
 pub(crate) fn open_external_url(url: String) -> CommandResult<()> {
     let parsed = reqwest::Url::parse(&url).map_err(|_| "invalid sign-in URL".to_owned())?;
     let host = parsed.host_str().unwrap_or_default();
@@ -118,10 +134,16 @@ pub(crate) fn open_external_url(url: String) -> CommandResult<()> {
 
 #[tauri::command]
 /// 在指定目錄建立唯一檔名，避免覆寫已匯出的日誌。
-/// @param contents 目前篩選後的日誌文字。
-/// @param folder 絕對目錄；空白時使用 Downloads。
-/// @param app 目前 Tauri 應用控制柄。
-/// @return 匯出檔案的完整路徑或 I/O 錯誤。
+///
+/// # 參數
+///
+/// - `contents` 目前篩選後的日誌文字。
+/// - `folder` 絕對目錄；空白時使用 Downloads。
+/// - `app` 目前 Tauri 應用控制柄。
+///
+/// # 回傳
+///
+/// 匯出檔案的完整路徑或 I/O 錯誤。
 pub(crate) fn export_session_log(
     contents: String,
     folder: String,
@@ -145,9 +167,15 @@ pub(crate) fn export_session_log(
 }
 
 /// 以 create_new 建立含時間與 UUID 的日誌檔。
-/// @param directory 已存在的輸出目錄。
-/// @param contents UTF-8 日誌內容。
-/// @return 新檔案路徑或寫入錯誤。
+///
+/// # 參數
+///
+/// - `directory` 已存在的輸出目錄。
+/// - `contents` UTF-8 日誌內容。
+///
+/// # 回傳
+///
+/// 新檔案路徑或寫入錯誤。
 fn write_session_log(directory: &Path, contents: &str) -> CommandResult<PathBuf> {
     // 同一秒可連續匯出；唯一名稱配合 create_new，保證不覆寫先前記錄。
     let filename = format!(
@@ -168,8 +196,14 @@ fn write_session_log(directory: &Path, contents: &str) -> CommandResult<PathBuf>
 
 #[tauri::command]
 /// 取得目前使用者的 Downloads 目錄。
-/// @param app 目前 Tauri 應用控制柄。
-/// @return 完整目錄路徑。
+///
+/// # 參數
+///
+/// - `app` 目前 Tauri 應用控制柄。
+///
+/// # 回傳
+///
+/// 完整目錄路徑。
 pub(crate) fn default_export_log_path(app: tauri::AppHandle) -> CommandResult<String> {
     app.path()
         .download_dir()
@@ -179,10 +213,16 @@ pub(crate) fn default_export_log_path(app: tauri::AppHandle) -> CommandResult<St
 
 #[tauri::command]
 /// 只讀取最近一次授權拖放且不超過大小限制的文字檔。
-/// @param path 待讀取的絕對路徑。
-/// @param window 提出要求的 Tauri 視窗。
-/// @param dropped_files 單次原生拖放授權服務。
-/// @return UTF-8 Cookie 文字或授權／I/O 錯誤。
+///
+/// # 參數
+///
+/// - `path` 待讀取的絕對路徑。
+/// - `window` 提出要求的 Tauri 視窗。
+/// - `dropped_files` 單次原生拖放授權服務。
+///
+/// # 回傳
+///
+/// UTF-8 Cookie 文字或授權／I/O 錯誤。
 pub(crate) fn read_cookie_file(
     path: String,
     window: tauri::Window,

@@ -22,10 +22,16 @@ pub(crate) const MAX_SERVER_ADDRESS_BYTES: usize = 255;
 pub(crate) const MAX_USERNAME_BYTES: usize = 64;
 
 /// 按 UTF-8 位元組限制外部字串長度。
-/// @param value 待驗證字串。
-/// @param field 錯誤訊息中的欄位名稱。
-/// @param max_bytes 允許的最大位元組數。
-/// @return 符合限制為 Ok，超長則回傳錯誤。
+///
+/// # 參數
+///
+/// - `value` 待驗證字串。
+/// - `field` 錯誤訊息中的欄位名稱。
+/// - `max_bytes` 允許的最大位元組數。
+///
+/// # 回傳
+///
+/// 符合限制為 Ok，超長則回傳錯誤。
 pub(crate) fn validate_length(value: &str, field: &str, max_bytes: usize) -> Result<()> {
     if value.len() > max_bytes {
         bail!("{field} exceeds {max_bytes} bytes");

@@ -21,9 +21,15 @@ use tauri::State;
 
 #[tauri::command]
 /// 建立配對計畫並開始玩家日誌追蹤。
-/// @param input 配對模式、Bot 選擇及日誌路徑。
-/// @param state Tauri 管理的應用狀態。
-/// @return 啟動後的配對快照。
+///
+/// # 參數
+///
+/// - `input` 配對模式、Bot 選擇及日誌路徑。
+/// - `state` Tauri 管理的應用狀態。
+///
+/// # 回傳
+///
+/// 啟動後的配對快照。
 pub(crate) async fn start_matchmaking(
     input: StartMatchmakingInput,
     state: State<'_, AppState>,
@@ -33,8 +39,14 @@ pub(crate) async fn start_matchmaking(
 
 #[tauri::command]
 /// 停止配對並撤回參與 Bot。
-/// @param state Tauri 管理的應用狀態。
-/// @return 停止後的配對快照。
+///
+/// # 參數
+///
+/// - `state` Tauri 管理的應用狀態。
+///
+/// # 回傳
+///
+/// 停止後的配對快照。
 pub(crate) async fn stop_matchmaking(
     state: State<'_, AppState>,
 ) -> CommandResult<MatchmakingSnapshot> {
@@ -43,8 +55,14 @@ pub(crate) async fn stop_matchmaking(
 
 #[tauri::command]
 /// 查詢配對狀態，不變更執行模式。
-/// @param state Tauri 管理的應用狀態。
-/// @return 目前配對快照。
+///
+/// # 參數
+///
+/// - `state` Tauri 管理的應用狀態。
+///
+/// # 回傳
+///
+/// 目前配對快照。
 pub(crate) async fn get_matchmaking_snapshot(
     state: State<'_, AppState>,
 ) -> CommandResult<MatchmakingSnapshot> {

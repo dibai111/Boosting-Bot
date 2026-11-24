@@ -13,7 +13,11 @@
 
 //! 管理配對工作階段的啟停、事件分派與快照發布，細部策略分散至子模組。
 
+#[cfg(test)]
+mod behavior_tests;
+mod effects;
 mod flow;
+mod input;
 mod lifecycle;
 mod queue;
 mod retry;
@@ -23,6 +27,7 @@ mod verification;
 
 use self::{
     flow::{selected_bot_ids, waiting_bot},
+    input::{SessionInput, TimerKind},
     state::SessionState,
 };
 use super::{
@@ -46,24 +51,34 @@ pub(crate) struct MatchmakingDiagnostic {
 
 /// 多 Bot 配對協調器，持有計畫、每輪狀態、日誌追蹤及快照通道。
 pub struct MatchmakingSession {
-    pub(crate) bots: Arc<BotRuntime>,
-    pub(crate) lifecycle: Mutex<()>,
-    pub(crate) state: Mutex<SessionState>,
-    pub(crate) tailer: Mutex<Option<PlayerLogTailer>>,
-    pub(crate) snapshots: watch::Sender<MatchmakingSnapshot>,
-    pub(crate) diagnostics: broadcast::Sender<MatchmakingDiagnostic>,
+    effects: Arc<dyn effects::MatchmakingEffects>,
+    lifecycle: Mutex<()>,
+    state: Mutex<SessionState>,
+    tailer: Mutex<Option<PlayerLogTailer>>,
+    snapshots: watch::Sender<MatchmakingSnapshot>,
+    diagnostics: broadcast::Sender<MatchmakingDiagnostic>,
 }
 
 impl MatchmakingSession {
     /// 建立空閒配對工作階段與有界通知通道。
-    /// @param bots 發送配對業務指令的 Bot runtime。
-    /// @return 尚未啟動日誌追蹤的協調器。
+    ///
+    /// # 參數
+    ///
+    /// - `bots` 發送配對業務指令的 Bot runtime。
+    ///
+    /// # 回傳
+    ///
+    /// 尚未啟動日誌追蹤的協調器。
     pub fn new(bots: Arc<BotRuntime>) -> Self {
+        Self::with_effects(Arc::new(effects::RuntimeEffects(bots)))
+    }
+
+    fn with_effects(effects: Arc<dyn effects::MatchmakingEffects>) -> Self {
         let snapshot = MatchmakingSnapshot::idle();
         let (snapshots, _) = watch::channel(snapshot.clone());
         let (diagnostics, _) = broadcast::channel(128);
         Self {
-            bots,
+            effects,
             lifecycle: Mutex::new(()),
             state: Mutex::new(SessionState::new(snapshot)),
             tailer: Mutex::new(None),
@@ -73,21 +88,31 @@ impl MatchmakingSession {
     }
 
     /// 訂閱最新配對快照。
-    /// @return watch 接收端；中間快照可能被較新狀態取代。
+    ///
+    /// # 回傳
+    ///
+    /// watch 接收端；中間快照可能被較新狀態取代。
     pub fn subscribe(&self) -> watch::Receiver<MatchmakingSnapshot> {
         self.snapshots.subscribe()
     }
 
     /// 訂閱配對診斷事件。
-    /// @return 有界廣播接收端。
+    ///
+    /// # 回傳
+    ///
+    /// 有界廣播接收端。
     pub(crate) fn subscribe_diagnostics(&self) -> broadcast::Receiver<MatchmakingDiagnostic> {
         self.diagnostics.subscribe()
     }
 
     /// 發布供日誌顯示的配對診斷。
-    /// @param bot_id 診斷所屬 Bot，整體訊息為 None。
-    /// @param message 不含憑據的診斷文字。
-    /// @return 無回傳值；無訂閱者可丟棄。
+    ///
+    /// # 參數
+    ///
+    /// - `bot_id` 診斷所屬 Bot，整體訊息為 None。
+    /// - `message` 不含憑據的診斷文字。
+    ///
+    /// 無訂閱者可丟棄。
     pub(crate) fn diagnose(&self, bot_id: Option<&str>, message: impl Into<String>) {
         let _ = self.diagnostics.send(MatchmakingDiagnostic {
             bot_id: bot_id.map(str::to_owned),
@@ -95,22 +120,24 @@ impl MatchmakingSession {
         });
     }
 
-    /// 在狀態鎖內複製目前配對快照。
-    /// @return 獨立的最新快照。
+    /// 複製最後發布的快照，包含事件、命令回覆與初始讀取共用的版本。
+    ///
+    /// # 回傳
+    ///
+    /// 獨立的最新快照。
     pub async fn snapshot(&self) -> MatchmakingSnapshot {
-        self.state.lock().await.snapshot.clone()
-    }
-
-    /// 只取得配對階段，避免複製所有 Bot 狀態。
-    /// @return 目前配對階段。
-    pub(crate) async fn phase(&self) -> MatchmakingPhase {
-        // 模式判斷只需要階段，避免複製所有 bot 的快照資料。
-        self.state.lock().await.snapshot.phase
+        self.snapshots.borrow().clone()
     }
 
     /// 序列化啟停操作，開啟玩家日誌並建立新的配對工作階段。
-    /// @param plan 已驗證的不可變配對計畫。
-    /// @return 等待玩家轉服的快照，或路徑／追蹤啟動錯誤。
+    ///
+    /// # 參數
+    ///
+    /// - `plan` 已驗證的不可變配對計畫。
+    ///
+    /// # 回傳
+    ///
+    /// 等待玩家轉服的快照，或路徑／追蹤啟動錯誤。
     pub async fn start(self: &Arc<Self>, plan: MatchmakingPlan) -> Result<MatchmakingSnapshot> {
         let _lifecycle = self.lifecycle.lock().await;
         let path = tokio::fs::canonicalize(PathBuf::from(plan.log_path()))
@@ -129,6 +156,7 @@ impl MatchmakingSession {
             state.plan = Some(plan);
             state.clear_round_tracking();
             state.snapshot = MatchmakingSnapshot {
+                revision: 0,
                 session_id: Some(Uuid::new_v4().to_string()),
                 round_id: None,
                 phase: MatchmakingPhase::AwaitingPlayer,
@@ -142,16 +170,45 @@ impl MatchmakingSession {
             state.snapshot.clone()
         };
         *self.tailer.lock().await = Some(tailer);
-        self.publish(snapshot.clone());
-        self.spawn_log_consumer(receiver);
+        let snapshot = self.publish(snapshot);
+        let _consumer = self.spawn_log_consumer(
+            snapshot.session_id.clone().expect("started session id"),
+            receiver,
+        );
         Ok(snapshot)
     }
 
     /// 停止日誌追蹤並撤回所選 Bot。
-    /// @return 停止完成後返回。
+    ///
+    /// # 回傳
+    ///
+    /// 停止完成後返回。
     pub async fn stop(&self) {
         let _lifecycle = self.lifecycle.lock().await;
         self.stop_inner().await;
+    }
+
+    /// 終止已失敗的工作階段，保留最後快照供畫面及診斷使用。
+    pub(crate) async fn finish_if_terminal(&self) -> bool {
+        let _lifecycle = self.lifecycle.lock().await;
+        if !matches!(
+            self.state.lock().await.snapshot.phase,
+            MatchmakingPhase::Idle | MatchmakingPhase::Failed
+        ) {
+            return false;
+        }
+        if let Some(tailer) = self.tailer.lock().await.take() {
+            tailer.stop().await;
+        }
+        let ids = {
+            let mut state = self.state.lock().await;
+            let ids = selected_bot_ids(&state);
+            state.reset_round();
+            state.plan = None;
+            ids
+        };
+        self.withdraw_bots(&ids).await;
+        true
     }
 
     async fn stop_inner(&self) {
@@ -171,9 +228,17 @@ impl MatchmakingSession {
     }
 
     /// 按事件種類分派嘗試結果、佇列、驗證及連線變更。
-    /// @param event Bot runtime 發布的業務事件。
-    /// @return 無回傳值；有效變更會發布快照。
+    ///
+    /// # 參數
+    ///
+    /// - `event` Bot runtime 發布的業務事件。
+    ///
+    /// 有效變更會發布快照。
     pub async fn handle_bot_event(self: &Arc<Self>, event: &BotEvent) {
+        self.handle_input(SessionInput::Bot(event.clone())).await;
+    }
+
+    async fn apply_bot_event(self: &Arc<Self>, event: &BotEvent) {
         match event {
             BotEvent::MatchAttemptResult {
                 bot_id,
@@ -278,31 +343,39 @@ impl MatchmakingSession {
     }
 
     /// 以弱參照消費日誌事件，避免背景任務維持協調器存活。
-    /// @param receiver 此日誌追蹤器的訊息接收端。
-    /// @return 無回傳值；建立背景消費任務。
-    fn spawn_log_consumer(self: &Arc<Self>, mut receiver: mpsc::Receiver<PlayerLogMessage>) {
+    ///
+    /// # 參數
+    ///
+    /// - `session_id` 日誌開啟時的工作階段識別，整個 consumer 生命週期固定。
+    /// - `receiver` 此日誌追蹤器的訊息接收端。
+    ///
+    /// # 回傳
+    ///
+    /// 消費任務；舊工作階段的排隊輸入會在共同入口被拒絕。
+    fn spawn_log_consumer(
+        self: &Arc<Self>,
+        session_id: String,
+        mut receiver: mpsc::Receiver<PlayerLogMessage>,
+    ) -> tokio::task::JoinHandle<()> {
         let coordinator = Arc::downgrade(self);
         tokio::spawn(async move {
             while let Some(message) = receiver.recv().await {
                 let Some(coordinator) = coordinator.upgrade() else {
                     break;
                 };
-                match message {
-                    PlayerLogMessage::Line(line) => coordinator.handle_player_line(&line).await,
-                    PlayerLogMessage::Unavailable(error) => {
-                        coordinator
-                            .fail_round(format!("Player log unavailable: {error}"))
-                            .await;
-                    }
-                }
+                coordinator.handle_player_log(&session_id, message).await;
             }
-        });
+        })
     }
 
     /// 解析玩家聊天日誌並推進配對輪次。
-    /// @param line 單行玩家日誌。
-    /// @return 無回傳值；非配對訊息忽略。
-    async fn handle_player_line(self: &Arc<Self>, line: &str) {
+    ///
+    /// # 參數
+    ///
+    /// - `line` 單行玩家日誌。
+    ///
+    /// 非配對訊息忽略。
+    async fn apply_player_line(self: &Arc<Self>, line: &str) {
         match parse_player_log_line(line) {
             Some(PlayerLogEvent::ServerTransfer(server)) => self.handle_player_server(server).await,
             Some(PlayerLogEvent::QueueProgress {
@@ -324,10 +397,23 @@ impl MatchmakingSession {
     }
 
     /// 替換 watch 通道內的最新快照。
-    /// @param snapshot 完整配對快照。
-    /// @return 無回傳值；尚無接收端仍保留最新值。
-    pub(crate) fn publish(&self, snapshot: MatchmakingSnapshot) {
-        self.snapshots.send_replace(snapshot);
+    ///
+    /// # 參數
+    ///
+    /// - `snapshot` 完整配對快照。
+    ///
+    /// # 回傳
+    ///
+    /// 帶新版本的快照；尚無接收端仍保留最新值。
+    fn publish(&self, mut snapshot: MatchmakingSnapshot) -> MatchmakingSnapshot {
+        self.snapshots.send_modify(|current| {
+            snapshot.revision = current
+                .revision
+                .checked_add(1)
+                .expect("snapshot revision exhausted");
+            *current = snapshot.clone();
+        });
+        snapshot
     }
 }
 
@@ -410,11 +496,17 @@ mod tests {
                 },
             )]),
             round_started_at: Some(Instant::now()),
-            player_queue: Some(duels::next_observation(None, 1, 2)),
-            player_bedwars_queue: Some(bedwars::observe_queue(1, 8)),
+            player_queue: Some(duels::next_observation(None, 1, 2, Instant::now())),
+            player_bedwars_queue: Some(bedwars::observe_queue(1, 8, Instant::now())),
             player_queue_usernames: HashSet::from(["Player".to_owned()]),
-            bot_queues: HashMap::from([("bot-a".to_owned(), duels::next_observation(None, 1, 2))]),
-            bot_bedwars_queues: HashMap::from([("bot-a".to_owned(), bedwars::observe_queue(1, 8))]),
+            bot_queues: HashMap::from([(
+                "bot-a".to_owned(),
+                duels::next_observation(None, 1, 2, Instant::now()),
+            )]),
+            bot_bedwars_queues: HashMap::from([(
+                "bot-a".to_owned(),
+                bedwars::observe_queue(1, 8, Instant::now()),
+            )]),
             bot_transfers: HashSet::from(["bot-a".to_owned()]),
             presence_checks: HashMap::from([(
                 "bot-a".to_owned(),
@@ -493,87 +585,5 @@ mod tests {
             assert!(is_terminal_bot_error(code), "{code}");
         }
         assert!(!is_terminal_bot_error("command_spam"));
-    }
-
-    #[tokio::test]
-    async fn late_retry_cannot_reopen_a_committed_bot() {
-        let session = Arc::new(MatchmakingSession::new(Arc::new(BotRuntime::new(
-            crate::bot_runtime::BotEventBus::new(),
-        ))));
-        {
-            let mut state = session.state.lock().await;
-            state.snapshot.phase = MatchmakingPhase::Committed;
-            state.snapshot.matched_bots = 1;
-            let mut bot = waiting_bot("bot-a");
-            bot.phase = BotMatchPhase::Matched;
-            state.snapshot.bots.push(bot);
-        }
-        session
-            .schedule_retry("bot-a", None, "late timeout", Duration::ZERO, true)
-            .await;
-        let state = session.state.lock().await;
-        assert_eq!(state.snapshot.bots[0].phase, BotMatchPhase::Matched);
-        assert!(state.retry_requests.is_empty());
-    }
-
-    #[tokio::test]
-    async fn failed_round_clears_the_matched_summary() {
-        let session = MatchmakingSession::new(Arc::new(BotRuntime::new(
-            crate::bot_runtime::BotEventBus::new(),
-        )));
-        {
-            let mut state = session.state.lock().await;
-            state.plan = Some(plan(&["bot-a", "bot-b"], 2));
-            state.snapshot.phase = MatchmakingPhase::Matching;
-            state.snapshot.matched_bots = 1;
-            state.snapshot.bots = ["bot-a", "bot-b"].into_iter().map(waiting_bot).collect();
-            state.snapshot.bots[0].phase = BotMatchPhase::Matched;
-        }
-        session.fail_round("Game started too early").await;
-        let snapshot = session.snapshot().await;
-        assert_eq!(snapshot.phase, MatchmakingPhase::Failed);
-        assert_eq!(snapshot.matched_bots, 0);
-        assert_eq!(matched_count(&snapshot), 0);
-    }
-
-    #[tokio::test]
-    async fn late_confirmation_cannot_change_a_committed_round() {
-        let session = MatchmakingSession::new(Arc::new(BotRuntime::new(
-            crate::bot_runtime::BotEventBus::new(),
-        )));
-        {
-            let mut state = session.state.lock().await;
-            state.snapshot.phase = MatchmakingPhase::Matching;
-            state.snapshot.required_matches = 1;
-            state.snapshot.bots = ["bot-a", "bot-b"].into_iter().map(waiting_bot).collect();
-            for bot in &mut state.snapshot.bots {
-                bot.phase = BotMatchPhase::Queued;
-            }
-            state
-                .active_attempts
-                .insert("bot-a".to_owned(), "a".to_owned());
-            state
-                .active_attempts
-                .insert("bot-b".to_owned(), "b".to_owned());
-            state.presence_checks.insert(
-                "bot-b".to_owned(),
-                PresenceCheck {
-                    username: "Bravo".to_owned(),
-                    generation: 1,
-                    attempt_id: "b".to_owned(),
-                    server: "mini1".to_owned(),
-                },
-            );
-        }
-        session.mark_matched("bot-a", Some("mini1")).await;
-        session.mark_matched("bot-b", Some("mini1")).await;
-        let snapshot = session.snapshot().await;
-        assert_eq!(snapshot.phase, MatchmakingPhase::Committed);
-        assert_eq!(snapshot.matched_bots, 1);
-        assert_eq!(snapshot.bots[1].phase, BotMatchPhase::Returning);
-        assert!(session.state.lock().await.presence_checks.is_empty());
-
-        session.mark_unavailable("bot-a", "Disconnected").await;
-        assert_eq!(session.snapshot().await.matched_bots, 0);
     }
 }

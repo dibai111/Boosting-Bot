@@ -12,7 +12,7 @@ https://www.gnu.org/licenses/agpl-3.0.html
 -->
 
 <script lang="ts">
-  // 管理 Nick 表單、候選決定及音效；事件投影交由獨立的 view builder 處理。
+  // 管理 Nick 表單、候選決定及音效；每個 Bot 的畫面狀態由事件轉換函式產生。
   import { onMount } from "svelte";
   import {
     Activity,
@@ -26,8 +26,11 @@ https://www.gnu.org/licenses/agpl-3.0.html
     VolumeX,
     X,
   } from "@lucide/svelte";
-  import { api } from "@botting/user-api";
-  import { createNickBotViewBuilder, type NickBotView } from "../../features/nick-roller-view";
+  import {
+    emptyNickBotState,
+    type NickBotState,
+    type NickBotView,
+  } from "../../features/nick-roller-view";
   import {
     defaultNickRollerConfig,
     parseNickRollerConfig,
@@ -52,7 +55,7 @@ https://www.gnu.org/licenses/agpl-3.0.html
   export let t: (key: MessageKey) => string;
   export let settingsOnly = false;
   export let onToggleBot: (botId: string) => void = () => {};
-  export let savePreference: (key: string, value: string) => void = () => {};
+  export let savePreference: (key: string, value: string) => Promise<void>;
   export let showToast: (message: string, kind: "success" | "error") => void = () => {};
 
   const configStorageKey = "botting-nick-roller-config";
@@ -60,11 +63,15 @@ https://www.gnu.org/licenses/agpl-3.0.html
   let config = defaultNickRollerConfig();
   let loadedConfigValue = "";
   let saving = false;
-  let starting = false;
+  let pendingConfigSaves = 0;
+  export let starting = false;
+  export let botStates: Record<string, NickBotState> = {};
+  export let onStart: (config: NickRollerEngineConfig) => Promise<void>;
+  export let onStop: () => Promise<void>;
+  export let onDecide: (botId: string, take: boolean) => Promise<void>;
   let now = Date.now();
   let audioContext: AudioContext | null = null;
   let lastSoundCandidateKey: string | null | undefined;
-  const buildBotView = createNickBotViewBuilder();
 
   $: if (settings[configStorageKey] !== loadedConfigValue) {
     loadedConfigValue = settings[configStorageKey] ?? "";
@@ -74,7 +81,7 @@ https://www.gnu.org/licenses/agpl-3.0.html
   $: selectedOnlineBots = onlineBots.filter((account) => selectedBotIds.has(account.id));
   $: botViews = accounts
     .filter((account) => selectedBotIds.has(account.id))
-    .map((account) => buildBotView(account, events, activeMode));
+    .map((account) => ({ account, ...(botStates[account.id] ?? emptyNickBotState()) }));
   $: activeBotViews = botViews.filter(
     (bot) =>
       bot.phase !== "idle" &&
@@ -114,6 +121,7 @@ https://www.gnu.org/licenses/agpl-3.0.html
   }
 
   onMount(() => {
+    // 從目前候選開始記錄，重新掛載面板時避免為既有候選重播提示音。
     lastSoundCandidateKey = latestAcceptedCandidateKey(events);
     const timer = window.setInterval(() => {
       now = Date.now();
@@ -146,6 +154,27 @@ https://www.gnu.org/licenses/agpl-3.0.html
     config = { ...config, rules: { ...config.rules, [key]: value } };
   }
 
+  type NickRuleSwitch = "allow_numbers" | "allow_underscore" | "legacy_priority" | "case_sensitive";
+  type NickSwitch = NickRuleSwitch | "stop_after_found" | "show_rejected";
+
+  // 這組欄位全是布林值，但其中兩個存於設定根物件，其餘存於 rules。
+  const nickSwitches: ReadonlyArray<readonly [NickSwitch, MessageKey]> = [
+    ["allow_numbers", "nickRollerAllowNumbers"],
+    ["allow_underscore", "nickRollerAllowUnderscore"],
+    ["legacy_priority", "nickRollerLegacyPriority"],
+    ["stop_after_found", "nickRollerAutoTake"],
+    ["case_sensitive", "nickRollerCaseSensitive"],
+    ["show_rejected", "nickRollerShowRejected"],
+  ];
+
+  function toggleNickSwitch(key: NickSwitch, next: boolean): void {
+    if (key === "stop_after_found" || key === "show_rejected") {
+      config = { ...config, [key]: next };
+    } else {
+      updateRule(key, next);
+    }
+  }
+
   function updateLength(key: "exact_length" | "min_length" | "max_length", event: Event): void {
     const value = (event.currentTarget as HTMLInputElement).value;
     updateRule(key, value === "" ? null : Math.max(1, Math.min(16, Number(value))));
@@ -173,15 +202,19 @@ https://www.gnu.org/licenses/agpl-3.0.html
 
   /**
    * 將目前規則與音效偏好序列化交給設定儲存回呼。
-   * @return 提交設定的 Promise；實際持久化由父層負責。
+   * @return 對應設定寫入完成後返回；失敗保留輸入並顯示錯誤。
    */
   async function saveConfig(): Promise<void> {
+    pendingConfigSaves += 1;
     saving = true;
     try {
-      savePreference(configStorageKey, JSON.stringify(config));
+      await savePreference(configStorageKey, JSON.stringify(config));
       showToast(t("nickRollerSave"), "success");
+    } catch (error) {
+      showToast(String(error), "error");
     } finally {
-      saving = false;
+      pendingConfigSaves -= 1;
+      saving = pendingConfigSaves > 0;
     }
   }
 
@@ -190,68 +223,20 @@ https://www.gnu.org/licenses/agpl-3.0.html
    * @return 啟動流程的 Promise；錯誤透過通知顯示。
    */
   async function startRoller(): Promise<void> {
-    if (activeMode !== "idle") {
-      showToast(t("nickRollerRunningLock"), "error");
-      return;
-    }
-    if (!selectedOnlineBots.length) {
-      showToast(t("nickRollerNoOnlineBots"), "error");
-      return;
-    }
-    if (
-      config.rules.exact_length !== null &&
-      (config.rules.min_length !== null || config.rules.max_length !== null)
-    ) {
-      showToast(t("nickRollerExactLength"), "error");
-      return;
-    }
-    starting = true;
-    try {
-      const engineConfig: NickRollerEngineConfig = {
-        book_timeout_ms: config.book_timeout_ms,
-        next_roll_delay_ms: config.next_roll_delay_ms,
-        stop_after_found: config.stop_after_found,
-        rules: config.rules,
-      };
-      await api.startNickRoller({
-        bot_ids: selectedOnlineBots.map((account) => account.id),
-        config: engineConfig,
-      });
-      showToast(t("nickRollerStarted"), "success");
-    } catch (error) {
-      const message = String(error);
-      showToast(message.includes("mc.hypixel.net") ? t("nickRollerHypixelOnly") : message, "error");
-    } finally {
-      starting = false;
-    }
+    await onStart({
+      book_timeout_ms: config.book_timeout_ms,
+      next_roll_delay_ms: config.next_roll_delay_ms,
+      stop_after_found: config.stop_after_found,
+      rules: config.rules,
+    });
   }
 
-  /**
-   * 停止本次 Nick 篩選並顯示操作結果。
-   * @return 停止流程的 Promise。
-   */
   async function stopRoller(): Promise<void> {
-    try {
-      await api.stopNickRoller();
-      showToast(t("nickRollerStopped"), "success");
-    } catch (error) {
-      showToast(String(error), "error");
-    }
+    await onStop();
   }
 
-  /**
-   * 對畫面仍持有的候選送出決策。
-   * @param bot 包含候選編號的 Bot 畫面狀態。
-   * @param take true 接受，false 跳過。
-   * @return 決策發送流程的 Promise。
-   */
   async function decide(bot: NickBotView, take: boolean): Promise<void> {
-    if (bot.candidateId === null) return;
-    try {
-      await api.answerNickDecision(bot.account.id, bot.candidateId, take);
-    } catch (error) {
-      showToast(String(error), "error");
-    }
+    await onDecide(bot.account.id, take);
   }
 
   function toggleSound(): void {
@@ -457,36 +442,22 @@ https://www.gnu.org/licenses/agpl-3.0.html
           >
         </div>
         <div class="nick-toggle-grid">
-          {#each [["allow_numbers", "nickRollerAllowNumbers"], ["allow_underscore", "nickRollerAllowUnderscore"], ["legacy_priority", "nickRollerLegacyPriority"], ["stop_after_found", "nickRollerAutoTake"], ["case_sensitive", "nickRollerCaseSensitive"], ["show_rejected", "nickRollerShowRejected"]] as [key, label]}
+          {#each nickSwitches as [key, label] (key)}
+            {@const checked =
+              key === "stop_after_found" || key === "show_rejected"
+                ? config[key]
+                : config.rules[key]}
             <label class="nick-toggle-row">
-              <span>{t(label as MessageKey)}</span>
+              <span>{t(label)}</span>
               <button
                 type="button"
                 class="nick-switch"
-                class:on={key === "stop_after_found"
-                  ? config.stop_after_found
-                  : key === "show_rejected"
-                    ? config.show_rejected
-                    : Boolean(config.rules[key as keyof typeof config.rules])}
+                class:on={checked}
                 role="switch"
-                aria-label={t(label as MessageKey)}
-                aria-checked={key === "stop_after_found"
-                  ? config.stop_after_found
-                  : key === "show_rejected"
-                    ? config.show_rejected
-                    : Boolean(config.rules[key as keyof typeof config.rules])}
+                aria-label={t(label)}
+                aria-checked={checked}
                 disabled={activeMode === "nick_roller"}
-                on:click={() => {
-                  if (key === "show_rejected")
-                    config = { ...config, show_rejected: !config.show_rejected };
-                  else if (key === "stop_after_found")
-                    config = { ...config, stop_after_found: !config.stop_after_found };
-                  else
-                    updateRule(
-                      key as keyof typeof config.rules,
-                      !Boolean(config.rules[key as keyof typeof config.rules]) as never,
-                    );
-                }}><span></span></button
+                on:click={() => toggleNickSwitch(key, !checked)}><span></span></button
               >
             </label>
           {/each}

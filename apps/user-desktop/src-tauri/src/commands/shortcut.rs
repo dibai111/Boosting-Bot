@@ -18,10 +18,16 @@ use tauri::State;
 
 #[tauri::command]
 /// 解析並套用配對快捷鍵，拒絕衝突組合。
-/// @param shortcuts Tauri 管理的快捷鍵服務。
-/// @param stop_shortcut 配對啟停按鍵字串。
-/// @param show_overlay_shortcut 浮動視窗切換按鍵字串。
-/// @return 設定結果或穩定錯誤代碼。
+///
+/// # 參數
+///
+/// - `shortcuts` Tauri 管理的快捷鍵服務。
+/// - `stop_shortcut` 配對啟停按鍵字串。
+/// - `show_overlay_shortcut` 浮動視窗切換按鍵字串。
+///
+/// # 回傳
+///
+/// 設定結果或穩定錯誤代碼。
 pub(crate) fn configure_matchmaking_shortcuts(
     shortcuts: State<'_, MatchmakingShortcuts>,
     stop_shortcut: String,

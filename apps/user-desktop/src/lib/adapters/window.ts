@@ -20,6 +20,7 @@ import { fitWindowToWorkArea } from "../../../../shared-ui/window-fit";
 import {
   canvasScaleForCurrentViewport,
   waitForViewportLayout,
+  watchViewportResize,
 } from "../../../../shared-ui/viewport-fit";
 
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -78,14 +79,8 @@ async function resetWebviewZoom(): Promise<void> {
  * @return 解除 resize 監聽的清理函式。
  */
 export function watchUserCanvas(): () => void {
-  const update = () => fitCanvasToViewport();
-  update();
-  window.addEventListener("resize", update);
-  window.visualViewport?.addEventListener("resize", update);
-  return () => {
-    window.removeEventListener("resize", update);
-    window.visualViewport?.removeEventListener("resize", update);
-  };
+  // 每次更新重新讀取模式，同一組監聽同時支援進入畫面與主視窗。
+  return watchViewportResize(fitCanvasToViewport);
 }
 
 async function fitWindowTarget(

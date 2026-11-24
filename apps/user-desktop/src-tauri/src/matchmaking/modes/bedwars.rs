@@ -28,24 +28,37 @@ pub(crate) struct QueueObservation {
 }
 
 /// 記錄一次 BedWars 佇列人數。
-/// @param current 目前人數。
-/// @param total 佇列容量。
-/// @return 以目前 Instant 標記的觀察。
-pub(crate) fn observe_queue(current: u32, total: u32) -> QueueObservation {
+///
+/// # 參數
+///
+/// - `current` 目前人數。
+/// - `total` 佇列容量。
+/// - `observed_at` 由呼叫端時鐘提供的單調觀察時間。
+///
+/// # 回傳
+///
+/// 帶明確時間的新觀察。
+pub(crate) fn observe_queue(current: u32, total: u32, observed_at: Instant) -> QueueObservation {
     QueueObservation {
         current,
         total,
-        observed_at: Instant::now(),
+        observed_at,
     }
 }
 
 /// 要求相同伺服器及容量，且 Bot 人數在短時間內晚於玩家增加。
-/// @param player_server 玩家目標伺服器。
-/// @param bot_server Bot 觀察到的伺服器。
-/// @param round_started_at 本輪開始時間。
-/// @param player 玩家端佇列觀察。
-/// @param bot Bot 端佇列觀察。
-/// @return 符合本輪 BedWars 佇列條件時為 true。
+///
+/// # 參數
+///
+/// - `player_server` 玩家目標伺服器。
+/// - `bot_server` Bot 觀察到的伺服器。
+/// - `round_started_at` 本輪開始時間。
+/// - `player` 玩家端佇列觀察。
+/// - `bot` Bot 端佇列觀察。
+///
+/// # 回傳
+///
+/// 符合本輪 BedWars 佇列條件時為 true。
 pub(crate) fn is_candidate(
     player_server: Option<&str>,
     bot_server: Option<&str>,
@@ -117,8 +130,8 @@ mod tests {
     #[test]
     fn accepts_a_matching_late_queue_observation() {
         let started = Instant::now();
-        let player = observe_queue(6, 8);
-        let bot = observe_queue(7, 8);
+        let player = observe_queue(6, 8, started);
+        let bot = observe_queue(7, 8, started);
 
         assert!(is_candidate(
             Some("mini220Q"),

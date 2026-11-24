@@ -35,8 +35,14 @@ pub enum PlayerLogEvent {
 }
 
 /// 只處理 CHAT 區段，移除格式碼後辨識配對訊號。
-/// @param line 單行 Minecraft 玩家日誌。
-/// @return 已辨識事件；非聊天或無關內容為 None。
+///
+/// # 參數
+///
+/// - `line` 單行 Minecraft 玩家日誌。
+///
+/// # 回傳
+///
+/// 已辨識事件；非聊天或無關內容為 None。
 pub fn parse_player_log_line(line: &str) -> Option<PlayerLogEvent> {
     let payload = chat_payload(line)?;
     let plain = strip_formatting(payload);

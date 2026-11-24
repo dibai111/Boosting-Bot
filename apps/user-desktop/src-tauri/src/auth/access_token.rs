@@ -24,8 +24,14 @@ struct TokenClaims {
 }
 
 /// 解析 JWT exp 宣告；不驗證簽章，登入有效性仍由服務端判定。
-/// @param token 可能含首尾空白的 JWT。
-/// @return UTC 到期時間；格式、編碼或時間戳無效時為 None。
+///
+/// # 參數
+///
+/// - `token` 可能含首尾空白的 JWT。
+///
+/// # 回傳
+///
+/// UTC 到期時間；格式、編碼或時間戳無效時為 None。
 pub fn expiry(token: &str) -> Option<DateTime<Utc>> {
     let payload = token.trim().split('.').nth(1)?;
     let bytes = URL_SAFE_NO_PAD

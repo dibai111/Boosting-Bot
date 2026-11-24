@@ -11,7 +11,7 @@
  * https://www.gnu.org/licenses/agpl-3.0.html
  */
 
-//! 管理儲存版本、JSON 編解碼及讀取後修改再寫入的流程；呼叫端需序列化更新。
+//! 管理儲存版本、JSON 編解碼及以 Store 共用鎖序列化的讀改寫流程。
 
 use crate::{models::AccountSecrets, protection, registry, Store};
 use anyhow::{bail, Context, Result};

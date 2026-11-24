@@ -55,9 +55,15 @@ struct ReadChunk {
 impl PlayerLogTailer {
     /// 從啟動時的檔案尾端開始，避免舊遊戲記錄觸發新的配對。
     /// 驗證一般檔案並從當前尾端開始追蹤新增內容。
-    /// @param path 已正規化的玩家日誌路徑。
-    /// @param messages 接收完整行及不可用訊息的有界通道。
-    /// @return 可停止的追蹤器，或檔案驗證錯誤。
+    ///
+    /// # 參數
+    ///
+    /// - `path` 已正規化的玩家日誌路徑。
+    /// - `messages` 接收完整行及不可用訊息的有界通道。
+    ///
+    /// # 回傳
+    ///
+    /// 可停止的追蹤器，或檔案驗證錯誤。
     pub async fn start(path: PathBuf, messages: mpsc::Sender<PlayerLogMessage>) -> Result<Self> {
         let metadata = tokio::fs::metadata(&path)
             .await
@@ -75,7 +81,10 @@ impl PlayerLogTailer {
     }
 
     /// 要求停止追蹤並等待背景任務結束。
-    /// @return 背景任務結束後完成。
+    ///
+    /// # 回傳
+    ///
+    /// 背景任務結束後完成。
     pub async fn stop(mut self) {
         if let Some(stop) = self.stop.take() {
             let _ = stop.send(());
@@ -154,11 +163,17 @@ async fn send_message(
 }
 
 /// 以有限區塊讀取新增位元組，偵測截短及檔頭變更。
-/// @param path 玩家日誌路徑。
-/// @param offset 讀取位置；輪替時重設為零。
-/// @param signature 前次檔頭雜湊。
-/// @param signature_checked_at 上次檔頭檢查時間，用於節流。
-/// @return 新增資料與是否輪替的標記，或 I/O 錯誤。
+///
+/// # 參數
+///
+/// - `path` 玩家日誌路徑。
+/// - `offset` 讀取位置；輪替時重設為零。
+/// - `signature` 前次檔頭雜湊。
+/// - `signature_checked_at` 上次檔頭檢查時間，用於節流。
+///
+/// # 回傳
+///
+/// 新增資料與是否輪替的標記，或 I/O 錯誤。
 async fn read_new_bytes(
     path: &Path,
     offset: &mut u64,
@@ -210,11 +225,17 @@ async fn file_signature(path: &Path) -> Result<u64> {
 }
 
 /// 保留未完成行並發送完整行，限制單行大小。
-/// @param partial 跨區塊保留的未完成行緩衝區。
-/// @param bytes 本次新增位元組。
-/// @param messages 下游訊息通道。
-/// @param stop 可中斷通道等待的停止通知。
-/// @return 發送完成結果；停止或接收端關閉時為 Err。
+///
+/// # 參數
+///
+/// - `partial` 跨區塊保留的未完成行緩衝區。
+/// - `bytes` 本次新增位元組。
+/// - `messages` 下游訊息通道。
+/// - `stop` 可中斷通道等待的停止通知。
+///
+/// # 回傳
+///
+/// 發送完成結果；停止或接收端關閉時為 Err。
 async fn emit_lines(
     partial: &mut Vec<u8>,
     bytes: &[u8],

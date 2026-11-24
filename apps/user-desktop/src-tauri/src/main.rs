@@ -16,7 +16,10 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 /// 啟動桌面應用程式的 Tauri 入口。
-/// @return 應用事件迴圈結束後返回。
+///
+/// # 回傳
+///
+/// 應用事件迴圈結束後返回。
 fn main() {
     botting_user_lib::run();
 }

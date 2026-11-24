@@ -64,8 +64,9 @@ https://www.gnu.org/licenses/agpl-3.0.html
     modeGroups,
     modeOptions,
     modeOptionsForGame,
-  } from "./lib/features/matchmaking";
-  import { createUserAppController, type UserAppState } from "./lib/features/controller";
+  } from "./lib/features/matchmaking-options";
+  import { createUserAppController, type UserAppState } from "./lib/features/app-controller";
+  import { createSettingsFeature } from "./lib/features/settings.ts";
   import { createListenerScope } from "./lib/features/listener-scope";
   import { shortcutIdentity, shortcutLabel, shortcutModifiers } from "./lib/features/shortcuts";
   import {
@@ -116,7 +117,13 @@ https://www.gnu.org/licenses/agpl-3.0.html
   type ShortcutAction = "stop" | "show_overlay";
 
   export let settings: Record<string, string> = {};
-  let settingsSave = Promise.resolve();
+  const preferences = createSettingsFeature({
+    initialSettings: settings,
+    saveSettings: api.saveSettings,
+    onChange: (next) => {
+      settings = next;
+    },
+  });
 
   const isMatchmakingOverlay =
     new URLSearchParams(window.location.search).get("overlay") === "matchmaking";
@@ -126,6 +133,7 @@ https://www.gnu.org/licenses/agpl-3.0.html
     ? savedMatchMode!
     : "doubles";
   const idleMatchmaking: MatchmakingSnapshot = {
+    revision: 0,
     phase: "idle",
     required_matches: 0,
     matched_bots: 0,
@@ -196,7 +204,9 @@ https://www.gnu.org/licenses/agpl-3.0.html
   let requiredMatches = 1;
   let matchmakingBusy = false;
   let activeMode: RuntimeMode = "idle";
-  let nickEvents: BotEvent[] = [];
+  let nickEvents: UserAppState["nickEvents"] = [];
+  let nickBots: UserAppState["nickBots"] = {};
+  let nickBusy = false;
   let matchActive = false;
   let overlayVisible = false;
   let overlayAnimationKey = 0;
@@ -283,12 +293,6 @@ https://www.gnu.org/licenses/agpl-3.0.html
     return true;
   });
   $: matchActive = matchmaking.phase !== "idle" && matchmaking.phase !== "failed";
-  $: if (matchmaking.phase !== "idle" && matchmaking.mode) {
-    matchMode = matchmaking.mode;
-    matchGame = gameKindForMode(matchmaking.mode);
-  }
-  $: if (requiredMatches > Math.max(1, selectedOnlineBotCount))
-    requiredMatches = Math.max(1, selectedOnlineBotCount);
   $: userModalOpen =
     !isMatchmakingOverlay &&
     (logPathDialogOpen || addDialog !== null || deleteDialogOpen || deviceCode !== null);
@@ -307,6 +311,10 @@ https://www.gnu.org/licenses/agpl-3.0.html
     matchmaking = appState.matchmaking;
     matchmakingBusy = appState.matchmakingBusy;
     activeMode = appState.activeMode;
+    requiredMatches = appState.requiredMatches;
+    nickBots = appState.nickBots;
+    nickEvents = appState.nickEvents;
+    nickBusy = appState.nickBusy;
     overlayVisible = appState.overlayVisible;
     deviceCode = appState.deviceCode;
     deviceLinkError = appState.deviceLinkError;
@@ -328,13 +336,13 @@ https://www.gnu.org/licenses/agpl-3.0.html
     initialVerifyPresence: verifyPresence,
     initialVerifyDuelPitch: verifyDuelPitch,
     initialMatchLogPath: matchLogPath,
-    savePreference,
+    savePreferences: preferences.save,
     setWindowMode: (mode) => setUserWindowMode(mode),
     tick,
     phaseLabel,
     addLog,
     showToast,
-    translate: (key) => t(key as MessageKey),
+    translate: (key) => t(key),
     onChange: applyUserAppState,
   });
 
@@ -344,13 +352,19 @@ https://www.gnu.org/licenses/agpl-3.0.html
     if (isMatchmakingOverlay) {
       Promise.all([
         api.listAccounts(),
-        api.matchmakingSnapshot(),
-        listeners.track(api.onMatchmakingState(handleMatchmakingState)),
-        listeners.track(
-          api.onMatchmakingOverlayVisibility((visible) => {
-            if (visible) overlayAnimationKey += 1;
+        listeners
+          .track(api.onMatchmakingState(handleMatchmakingState))
+          .then(() => api.matchmakingSnapshot()),
+        listeners
+          .track(
+            api.onMatchmakingOverlayVisibility((snapshot) => {
+              if (userApp.handleOverlayState(snapshot) && snapshot.visible)
+                overlayAnimationKey += 1;
+            }),
+          )
+          .then(() => {
+            if (!listeners.isDisposed()) return userApp.refreshOverlay();
           }),
-        ),
       ])
         .then(([savedAccounts, savedMatchmaking]) => {
           if (listeners.isDisposed()) return;
@@ -374,30 +388,33 @@ https://www.gnu.org/licenses/agpl-3.0.html
     void api.configureMatchmakingShortcuts(stopShortcut, showOverlayShortcut).catch((error) => {
       showToast(shortcutErrorLabel(error), "error");
     });
-    void api
-      .activeMode()
-      .then((mode) => userApp.setActiveMode(mode))
-      .catch(() => undefined);
     void refreshMemory();
-    // 各監聽獨立納入生命週期管理，其他初始化請求失敗也不會遺失清理函式。
+    // 先訂閱再讀取快照，避免註冊期間漏接更新；每個監聽獨立管理清理函式。
     Promise.all([
       api.listAccounts(),
       api.defaultExportLogPath(),
-      api.matchmakingSnapshot(),
+      listeners
+        .track(api.onMatchmakingState(handleMatchmakingState))
+        .then(() => api.matchmakingSnapshot()),
       listeners.track(onFileDrop(handleNativeFileDrop)),
-      listeners.track(api.onBotEvent(handleBotEvent)),
-      listeners.track(api.onMatchmakingState(handleMatchmakingState)),
+      listeners.track(api.onBotEvent(handleBotEvent)).then(() => {
+        if (!listeners.isDisposed()) return userApp.refreshRuntimeMode().catch(() => undefined);
+      }),
       listeners.track(
         api.onMatchmakingDebug((diagnostic) =>
           addLog(`[match debug] ${diagnostic.message}`, diagnostic.bot_id ?? null),
         ),
       ),
       listeners.track(api.onMatchmakingShortcut(handleMatchmakingShortcut)),
-      listeners.track(
-        api.onMatchmakingOverlayVisibility((visible) => {
-          userApp.setOverlayVisible(visible);
+      listeners
+        .track(
+          api.onMatchmakingOverlayVisibility((snapshot) => {
+            userApp.handleOverlayState(snapshot);
+          }),
+        )
+        .then(() => {
+          if (!listeners.isDisposed()) return userApp.refreshOverlay();
         }),
-      ),
     ])
       .then(async ([savedAccounts, defaultExportPath, savedMatchmaking]) => {
         if (listeners.isDisposed()) return;
@@ -477,12 +494,6 @@ https://www.gnu.org/licenses/agpl-3.0.html
 
   function handleMatchmakingState(next: MatchmakingSnapshot) {
     userApp.handleMatchmakingState(next);
-    if ((next.phase === "idle" || next.phase === "failed") && activeMode === "matching") {
-      void api
-        .activeMode()
-        .then((mode) => userApp.setActiveMode(mode))
-        .catch(() => undefined);
-    }
   }
 
   function matchBotClass(phase: BotMatchPhase): string {
@@ -540,7 +551,7 @@ https://www.gnu.org/licenses/agpl-3.0.html
 
   function setLocale(next: Locale) {
     locale = next;
-    savePreference("botting-locale", next);
+    savePreferenceQuietly("botting-locale", next);
   }
 
   function toggleTheme() {
@@ -549,23 +560,17 @@ https://www.gnu.org/licenses/agpl-3.0.html
   }
 
   function applyTheme(next: Theme) {
-    savePreference("botting-theme", next);
+    savePreferenceQuietly("botting-theme", next);
     document.documentElement.dataset.theme = next;
   }
 
-  // 儲存完整快照時維持送出順序，避免較舊設定覆蓋新的輸入。
-  /**
-   * 依序保存完整設定，避免較舊請求覆蓋新輸入。
-   * @param key 設定鍵。
-   * @param value 已序列化的設定值。
-   * @return 無回傳值；儲存失敗透過通知顯示。
-   */
-  function savePreference(key: string, value: string): void {
-    settings = { ...settings, [key]: value };
-    const nextSettings = settings;
-    settingsSave = settingsSave
-      .then(() => api.saveSettings(nextSettings))
-      .catch((error) => showToast(String(error), "error"));
+  /** 等待這次設定實際保存；失敗保留草稿並交給呼叫端處理。 */
+  function savePreference(key: string, value: string): Promise<void> {
+    return preferences.save({ [key]: value });
+  }
+  /** 一般即時偏好不阻擋操作，但保存失敗必須顯示。 */
+  function savePreferenceQuietly(key: string, value: string): void {
+    void savePreference(key, value).catch((error) => showToast(String(error), "error"));
   }
 
   function toggleSelection(selection: Set<string>, id: string): Set<string> {
@@ -631,16 +636,7 @@ https://www.gnu.org/licenses/agpl-3.0.html
   }
 
   async function toggleMatchmaking() {
-    await userApp.toggleMatchmaking({
-      selectedBotIds,
-      matchMode,
-      matchGame,
-      favoriteMatchModes,
-      verifyPresence,
-      verifyDuelPitch,
-      requiredMatches,
-      matchLogPath,
-    });
+    await userApp.toggleMatchmaking();
   }
 
   function continueWithLogPath() {
@@ -708,7 +704,6 @@ https://www.gnu.org/licenses/agpl-3.0.html
       });
       markAccountEntry(account.id);
       userApp.setAccounts([...accounts, account]);
-      userApp.setPhases({ ...phases, [account.id]: "offline" });
       closeAddDialog();
       page = "accounts";
     } catch (error) {
@@ -741,8 +736,8 @@ https://www.gnu.org/licenses/agpl-3.0.html
     if (page === "matchmaking" && addDialog === null && event.type === "drop") {
       const path = event.paths[0];
       if (path?.toLowerCase().endsWith(".log")) {
-        userApp.setMatchLogPath(path);
-        savePreference("botting-player-log-path", path);
+        userApp.updateMatchmakingInput({ matchLogPath: path });
+        savePreferenceQuietly("botting-player-log-path", path);
       }
       return;
     }
@@ -799,20 +794,11 @@ https://www.gnu.org/licenses/agpl-3.0.html
   }
 
   /**
-   * 收集有界 Nick 事件，再交給 controller 更新 Bot 狀態。
+   * 將事件交給 controller，持續更新 Bot 與 Nick 狀態。
    * @param event 後端 Bot 事件。
    * @return 無回傳值。
    */
   function handleBotEvent(event: BotEvent) {
-    if (event.type === "runtime_mode" && event.mode === "nick_roller") nickEvents = [];
-    if (
-      event.type === "nick_roller_state" ||
-      event.type === "nick_candidate" ||
-      event.type === "nick_verification" ||
-      event.type === "nick_attention"
-    ) {
-      nickEvents = [...nickEvents.slice(-199), event];
-    }
     userApp.handleBotEvent(event);
   }
 
@@ -906,7 +892,7 @@ https://www.gnu.org/licenses/agpl-3.0.html
 
   function toggleChatLogs() {
     showChatLogs = !showChatLogs;
-    savePreference("botting-show-chat-debug", String(showChatLogs));
+    savePreferenceQuietly("botting-show-chat-debug", String(showChatLogs));
     if (showChatLogs && followSessionTail) void scrollSessionToLatest();
   }
 
@@ -945,7 +931,7 @@ https://www.gnu.org/licenses/agpl-3.0.html
   }
 
   function saveExportLogPath() {
-    savePreference("botting-export-log-path", exportLogPath);
+    savePreferenceQuietly("botting-export-log-path", exportLogPath);
   }
 
   function beginShortcutRecording(action: ShortcutAction) {
@@ -1002,8 +988,10 @@ https://www.gnu.org/licenses/agpl-3.0.html
       await api.configureMatchmakingShortcuts(nextStopShortcut, nextShowOverlayShortcut);
       stopShortcut = nextStopShortcut;
       showOverlayShortcut = nextShowOverlayShortcut;
-      savePreference("botting-stop-shortcut", stopShortcut);
-      savePreference("botting-show-overlay-shortcut", showOverlayShortcut);
+      await preferences.save({
+        "botting-stop-shortcut": stopShortcut,
+        "botting-show-overlay-shortcut": showOverlayShortcut,
+      });
     } catch (error) {
       showToast(shortcutErrorLabel(error), "error");
     }
@@ -1417,8 +1405,7 @@ https://www.gnu.org/licenses/agpl-3.0.html
                     statusTone={statusClass(phaseLabels[account.id] ?? "offline")}
                     selected={selectedBotIds.has(account.id)}
                     onSelect={() => {
-                      const next = toggleSelection(selectedBotIds, account.id);
-                      userApp.setSelectedBotIds(next);
+                      userApp.toggleBotSelection(account.id);
                     }}
                     onServerChange={(serverAddress) => saveServerFor(account, serverAddress)}
                   />
@@ -1431,11 +1418,15 @@ https://www.gnu.org/licenses/agpl-3.0.html
                 {selectedBotIds}
                 {activeMode}
                 events={nickEvents}
+                botStates={nickBots}
+                starting={nickBusy}
+                onStart={userApp.startNickRoller}
+                onStop={userApp.stopNickRoller}
+                onDecide={userApp.answerNickDecision}
                 {settings}
                 {t}
                 settingsOnly={page === "nick-roller-settings"}
-                onToggleBot={(botId) =>
-                  userApp.setSelectedBotIds(toggleSelection(selectedBotIds, botId))}
+                onToggleBot={userApp.toggleBotSelection}
                 {savePreference}
                 {showToast}
               />
@@ -1534,7 +1525,8 @@ https://www.gnu.org/licenses/agpl-3.0.html
                   <label class="match-log-field"
                     ><span class="matchmaking-field-label">{t("playerLog")}</span><input
                       value={matchLogPath}
-                      on:input={(event) => userApp.setMatchLogPath(event.currentTarget.value)}
+                      on:input={(event) =>
+                        userApp.updateMatchmakingInput({ matchLogPath: event.currentTarget.value })}
                       disabled={matchActive}
                       placeholder="C:\...\logs\latest.log"
                     /></label
@@ -1544,7 +1536,11 @@ https://www.gnu.org/licenses/agpl-3.0.html
                       type="number"
                       min="1"
                       max={Math.max(1, selectedOnlineBotCount)}
-                      bind:value={requiredMatches}
+                      value={requiredMatches}
+                      on:input={(event) =>
+                        userApp.updateMatchmakingInput({
+                          requiredMatches: event.currentTarget.valueAsNumber,
+                        })}
                       disabled={matchActive}
                     /></label
                   >
@@ -2017,7 +2013,8 @@ https://www.gnu.org/licenses/agpl-3.0.html
         <label
           >{t("playerLog")}<input
             value={matchLogPath}
-            on:input={(event) => userApp.setMatchLogPath(event.currentTarget.value)}
+            on:input={(event) =>
+              userApp.updateMatchmakingInput({ matchLogPath: event.currentTarget.value })}
             placeholder="C:\...\logs\latest.log"
             on:keydown={(event) => event.key === "Enter" && continueWithLogPath()}
           /></label

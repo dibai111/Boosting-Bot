@@ -1,0 +1,2 @@
+# Git、編輯器及格式化工具統一使用 LF；二進位資源由 Git 自動辨識。
+* text=auto eol=lf
